@@ -9,7 +9,8 @@ __global__ void cuda_sum_kernel(int *a, int *b, int *c, size_t size, float *pos)
     }
 
     c[idx] = a[idx] + b[idx];
-}
+    pos[idx] = pos[idx] / 2;
+} 
 
 extern "C" {
 void cuda_sum(int *a, int *b, int *c, size_t size, float *pos)
@@ -29,6 +30,7 @@ void cuda_sum(int *a, int *b, int *c, size_t size, float *pos)
     cuda_sum_kernel <<< ceil(size / 256.0), 256 >>> (d_a, d_b, d_c, size, d_pos);
 
     cudaMemcpy(c, d_c, size * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(pos, d_pos, size * sizeof(float), cudaMemcpyDeviceToHost);
 
     cudaFree(d_a);
     cudaFree(d_b);

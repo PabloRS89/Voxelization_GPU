@@ -69,6 +69,7 @@ def cuda_sum(a, b, c, size, pos):
 if __name__ == '__main__':
     size=int(1024*1024)
 
+
     a = np.ones(size).astype('int32')
     b = np.ones(size).astype('int32')
     c = np.zeros(size).astype('int32')    
@@ -76,3 +77,6 @@ if __name__ == '__main__':
     cuda_sum(a, b, c, size, s.pos)
 
     print c[:10]
+    print "Linea"
+    print s.pos.shape
+    print s.pos[:]
