@@ -39,20 +39,25 @@ class gadget:
 s = gadget('run_600')
 #s = gadget('32Mpc_051')
 #s = gadget('32Mpc_050.0256.fvol')
-print s.npart
-print s.HubbleParam
-print s.pos[:,0:3]
+print s.pos
 
 os.system("./build.sh")
 # extract cuda_sum function pointer in the shared object cuda_sum.so
 def get_cuda_sum():
-    dll = ctypes.CDLL('voxel.so', mode=ctypes.RTLD_GLOBAL)
+    dll = ctypes.CDLL('libr3d.so', mode=ctypes.RTLD_GLOBAL)
     func = dll.cuda_sum
     func.argtypes = [POINTER(c_int), POINTER(c_int), POINTER(c_int), c_size_t, POINTER(c_float)]
     return func
 
 # create __cuda_sum function with get_cuda_sum()
 __cuda_sum = get_cuda_sum()
+
+def getCuding():
+    dll = ctypes.CDLL('libr3d.so', mode=ctypes.RTLD_GLOBAL)
+    func = dll.sumTest    
+    func.argtypes = [c_int, c_int, c_int]
+    return func
+#__cuding = getCuding()
 
 # convenient python wrapper for __cuda_sum
 # it does all job with types convertation
@@ -65,18 +70,25 @@ def cuda_sum(a, b, c, size, pos):
 
     __cuda_sum(a_p, b_p, c_p, size, pos)
 
+#def cuding(a, b, c):
+   # __cuding(a,b,c)
+
 # testing, sum of two arrays of ones and output head part of resulting array
 if __name__ == '__main__':
-    size=int(1024*1024)
-
-
+    #size=int(1024*1024)
+    size=len(s.pos)*3
+    print size
     a = np.ones(size).astype('int32')
     b = np.ones(size).astype('int32')
     c = np.zeros(size).astype('int32')    
     
     cuda_sum(a, b, c, size, s.pos)
 
-    print c[:10]
-    print "Linea"
+    #print c[:]    
     print s.pos.shape
-    print s.pos[:]
+    print s.pos
+
+a = np.int32(25)
+b = np.int32(25)
+c = np.int32(0)
+#cuding(a, b, c)
