@@ -1,4 +1,3 @@
-
 ######################################################
 #
 #	Makefile
@@ -16,19 +15,22 @@
 
 ###############################
 
-CC = gcc
-CFLAGS = -Wall -I. -O3 
-SRC = r3d.c v3d.c
-DEPS = r3d.h v3d.h Makefile
-OBJ = $(SRC:.c=.o)
+CUDA      	= /usr/local/cuda-6.5
+NVCC 		= nvcc 
+NVCCFLAGS 	= -I. -arch sm_30 --compiler-options "-O3 -fPIC -malign-double -m64", --compiler-bindir=/usr/bin/g++-4.8
+LDFLAGS   	= -L$(CUDA)/lib64/
+LIBS      	= -lcuda -lcudart
+SRC 		= r3d.cu v3d.cu
+DEPS 		= r3d.h v3d.h Makefile
+OBJ 		= $(SRC:.cu=.o)
 
-all: libr3d.a
+all: libr3d.so
 
-libr3d.a: $(OBJ)
-	ar -rs $@ $^
+libr3d.so: $(OBJ)
+	ar -rcs $@ $^
 
-%.o: %.c $(DEPS)
-	$(CC) -c -o $@ $< $(CFLAGS) $(OPT)
+%.o: %.cu $(DEPS)
+	$(NVCC) --shared -c -o $@ $< $(NVCCFLAGS) $(LDFLAGS) $(OPT) $(LIBS)
 
 clean:
-	rm -rf libr3d.a $(OBJ) 
+	rm -rf *.o *.so 

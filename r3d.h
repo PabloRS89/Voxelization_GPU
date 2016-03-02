@@ -131,6 +131,7 @@ void r3d_clip(r3d_poly* poly, r3d_plane* planes, r3d_int nplanes);
  * `x*y`, `x*z`, `y^2`, `y*z`, `z^2`, `x^3`, `x^2*y`...
  *
  */
+
 #define R3D_NUM_MOMENTS(order) ((order+1)*(order+2)*(order+3)/6)
 void r3d_reduce(r3d_poly* poly, r3d_real* moments, r3d_int polyorder);
 
@@ -347,6 +348,5 @@ void r3d_box_faces_from_verts(r3d_plane* faces, r3d_rvec3* rbounds);
  */
 void r3d_poly_faces_from_verts(r3d_plane* faces, r3d_rvec3* vertices, r3d_int numverts, 
 						r3d_int** faceinds, r3d_int* numvertsperface, r3d_int numfaces);
-
 
 #endif // _R3D_H_
