@@ -35,60 +35,100 @@ class gadget:
         self.pos = np.fromfile(file, dtype='f', count=self.npart[1]*3)
         dummy =file.read(4)
         file.close()        
-        self.pos = self.pos.reshape((self.npart[1],3))
+        self.pos = self.pos.reshape((self.npart[1],3))              
 s = gadget('run_600')
 #s = gadget('32Mpc_051')
 #s = gadget('32Mpc_050.0256.fvol')
-print s.pos
+#print s.pos
 
 os.system("./build.sh")
 # extract cuda_sum function pointer in the shared object cuda_sum.so
 def get_cuda_sum():
     dll = ctypes.CDLL('libr3d.so', mode=ctypes.RTLD_GLOBAL)
     func = dll.cuda_sum
-    func.argtypes = [POINTER(c_int), POINTER(c_int), POINTER(c_int), c_size_t, POINTER(c_float)]
+    func.argtypes = [c_size_t, POINTER(c_float)]
     return func
 
 # create __cuda_sum function with get_cuda_sum()
 __cuda_sum = get_cuda_sum()
 
-def getCuding():
+def get_test_vox():
     dll = ctypes.CDLL('libr3d.so', mode=ctypes.RTLD_GLOBAL)
-    func = dll.sumTest    
-    func.argtypes = [c_int, c_int, c_int]
+    func = dll.test_voxelization
     return func
-#__cuding = getCuding()
 
+__vox = get_test_vox()
+
+def get_metrics():
+    dll = ctypes.CDLL('libr3d.so', mode=ctypes.RTLD_GLOBAL)
+    func = dll.calc_metrics
+    func.argtypes = [c_size_t, POINTER(c_float)]
+    return func
+
+__metrics = get_metrics()
+
+
+def get_mediana():
+    dll = ctypes.CDLL('libr3d.so', mode=ctypes.RTLD_GLOBAL)
+    func = dll.calc_mediana
+    func.argtypes = [c_size_t, POINTER(c_float)]
+    return func
+
+__mediana = get_mediana()
+
+def get_desv():
+    dll = ctypes.CDLL('libr3d.so', mode=ctypes.RTLD_GLOBAL)
+    func = dll.calc_desvEst
+    func.argtypes = [c_size_t, POINTER(c_float)]
+    return func
+
+__desv = get_desv()
+
+def get_maxmin():
+    dll = ctypes.CDLL('libr3d.so', mode=ctypes.RTLD_GLOBAL)
+    func = dll.calc_MaxMin
+    func.argtypes = [c_size_t, POINTER(c_float)]
+    return func
+
+__maxmin = get_maxmin()
 # convenient python wrapper for __cuda_sum
 # it does all job with types convertation
 # from python ones to C++ ones 
-def cuda_sum(a, b, c, size, pos):
-    a_p = a.ctypes.data_as(POINTER(c_int))
-    b_p = b.ctypes.data_as(POINTER(c_int))
-    c_p = c.ctypes.data_as(POINTER(c_int))
+def cuda_sum(size, pos):
     pos = pos.ctypes.data_as(POINTER(c_float))
+    __cuda_sum(size, pos)
 
-    __cuda_sum(a_p, b_p, c_p, size, pos)
+def voxelization_test():
+    __vox()
 
-#def cuding(a, b, c):
-   # __cuding(a,b,c)
+def cuda_metrics(size, pos):
+    pos = pos.ctypes.data_as(POINTER(c_float))
+    __metrics(size, pos)
+
+def cuda_mediana(size, pos):
+    pos = pos.ctypes.data_as(POINTER(c_float))
+    __mediana(size, pos)
+
+def cuda_desv(size, pos):
+    pos = pos.ctypes.data_as(POINTER(c_float))
+    __desv(size, pos)
+
+def cuda_MaxMin(size, pos):
+    pos = pos.ctypes.data_as(POINTER(c_float))
+    __maxmin(size, pos)
 
 # testing, sum of two arrays of ones and output head part of resulting array
 if __name__ == '__main__':
     #size=int(1024*1024)
     size=len(s.pos)*3
-    print size
-    a = np.ones(size).astype('int32')
-    b = np.ones(size).astype('int32')
-    c = np.zeros(size).astype('int32')    
-    
-    cuda_sum(a, b, c, size, s.pos)
+    #print size
+    #cuda_sum(size, s.pos)
+    cuda_metrics(size, s.pos)
+    cuda_mediana(size, s.pos)
+    cuda_desv(size, s.pos)
+    cuda_MaxMin(size, s.pos)    
 
     #print c[:]    
-    print s.pos.shape
-    print s.pos
-
-a = np.int32(25)
-b = np.int32(25)
-c = np.int32(0)
-#cuding(a, b, c)
+    #print s.pos.shape
+    #print s.pos
+    #voxelization_test()
