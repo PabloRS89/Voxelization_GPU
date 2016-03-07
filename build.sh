@@ -1,7 +1,6 @@
 #!/bin/bash
 
 #g++ -fpic -g -c -Wall hello.cu
-nvcc -m64 -o libr3d.so --shared -Xcompiler -fPIC r3d.cu v3d.cu
-rm *.o
+nvcc -arch=sm_30 -m64 -o libr3d.so -lcublas --shared -Xcompiler -fPIC r3d.cu v3d.cu
 #make a shared library, not a static library (thanks cat plus plus) voxelCuda.cu
-#g++ -shared -o hello.so hello.o
+#g++ -shared -o hello.so hello.o  

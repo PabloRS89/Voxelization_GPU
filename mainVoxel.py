@@ -42,16 +42,7 @@ s = gadget('run_600')
 #print s.pos
 
 os.system("./build.sh")
-# extract cuda_sum function pointer in the shared object cuda_sum.so
-def get_cuda_sum():
-    dll = ctypes.CDLL('libr3d.so', mode=ctypes.RTLD_GLOBAL)
-    func = dll.cuda_sum
-    func.argtypes = [c_size_t, POINTER(c_float)]
-    return func
-
-# create __cuda_sum function with get_cuda_sum()
-__cuda_sum = get_cuda_sum()
-
+# extract cuda_sum function pointer in the shared object
 def get_test_vox():
     dll = ctypes.CDLL('libr3d.so', mode=ctypes.RTLD_GLOBAL)
     func = dll.test_voxelization
@@ -59,30 +50,30 @@ def get_test_vox():
 
 __vox = get_test_vox()
 
-def get_metrics():
+def get_avg():
     dll = ctypes.CDLL('libr3d.so', mode=ctypes.RTLD_GLOBAL)
-    func = dll.calc_metrics
+    func = dll.calc_avg
     func.argtypes = [c_size_t, POINTER(c_float)]
     return func
 
-__metrics = get_metrics()
+__average = get_avg()
 
 
-def get_mediana():
+def get_medium():
     dll = ctypes.CDLL('libr3d.so', mode=ctypes.RTLD_GLOBAL)
-    func = dll.calc_mediana
+    func = dll.calc_medium
     func.argtypes = [c_size_t, POINTER(c_float)]
     return func
 
-__mediana = get_mediana()
+__medium = get_medium()
 
-def get_desv():
+def get_stdev():
     dll = ctypes.CDLL('libr3d.so', mode=ctypes.RTLD_GLOBAL)
-    func = dll.calc_desvEst
+    func = dll.calc_StDev
     func.argtypes = [c_size_t, POINTER(c_float)]
     return func
 
-__desv = get_desv()
+__sd = get_stdev()
 
 def get_maxmin():
     dll = ctypes.CDLL('libr3d.so', mode=ctypes.RTLD_GLOBAL)
@@ -91,41 +82,34 @@ def get_maxmin():
     return func
 
 __maxmin = get_maxmin()
-# convenient python wrapper for __cuda_sum
+# convenient python wrapper
 # it does all job with types convertation
 # from python ones to C++ ones 
-def cuda_sum(size, pos):
-    pos = pos.ctypes.data_as(POINTER(c_float))
-    __cuda_sum(size, pos)
-
 def voxelization_test():
     __vox()
 
-def cuda_metrics(size, pos):
+def cuda_average(size, pos):
     pos = pos.ctypes.data_as(POINTER(c_float))
-    __metrics(size, pos)
+    __average(size, pos)
 
-def cuda_mediana(size, pos):
+def cuda_medium(size, pos):
     pos = pos.ctypes.data_as(POINTER(c_float))
-    __mediana(size, pos)
+    __medium(size, pos)
 
-def cuda_desv(size, pos):
+def cuda_stdev(size, pos):
     pos = pos.ctypes.data_as(POINTER(c_float))
-    __desv(size, pos)
+    __sd(size, pos)
 
 def cuda_MaxMin(size, pos):
     pos = pos.ctypes.data_as(POINTER(c_float))
     __maxmin(size, pos)
 
 # testing, sum of two arrays of ones and output head part of resulting array
-if __name__ == '__main__':
-    #size=int(1024*1024)
-    size=len(s.pos)*3
-    #print size
-    #cuda_sum(size, s.pos)
-    cuda_metrics(size, s.pos)
-    cuda_mediana(size, s.pos)
-    cuda_desv(size, s.pos)
+if __name__ == '__main__':    
+    size=len(s.pos)*3    
+    cuda_average(size, s.pos)
+    cuda_medium(size, s.pos)
+    cuda_stdev(size, s.pos)
     cuda_MaxMin(size, s.pos)    
 
     #print c[:]    
