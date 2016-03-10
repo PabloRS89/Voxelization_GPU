@@ -82,6 +82,7 @@ def get_maxmin():
     return func
 
 __maxmin = get_maxmin()
+
 # convenient python wrapper
 # it does all job with types convertation
 # from python ones to C++ ones 

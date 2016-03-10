@@ -24,13 +24,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 #include <thrust/sort.h>
+#include <thrust/copy.h>
+#include <thrust/sequence.h>
 #include <thrust/random.h>
-#include <thrust/functional.h>
+#include <thrust/generate.h>
+#include <thrust/detail/type_traits.h>
 #include <cuda_runtime.h>
 #include "cublas_v2.h"
-#include <arrayfire.h>
 
 // size of the grid
 #define NGRID 23
@@ -913,7 +916,7 @@ float medium_CPU(size_t size, float *pos){
 		medium = (medium1 + medium2) / 2;
 	}else{
 		medium = pos[x];
-	}	
+	}		
 	return medium;
 }
 //Calculate the standar deviation in secuential programming over CPU
@@ -943,6 +946,42 @@ __global__ void StDev_GPU(size_t size, float *pos, float *medium, float *ED){
 		
 	atomicAdd(ED, tmp);
 	__syncthreads();
+}
+void medium_GPU(size_t size, float *pos){
+	cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start, 0); 
+	
+    thrust::host_vector<float> h_keys(size);		
+	for(int i=0; i<size; i++){
+		h_keys[i] = pos[i];
+	}
+	thrust::device_vector<float> d_values = h_keys;
+	thrust::sort(d_values.begin(), d_values.end());
+	thrust::host_vector<float> h_values = d_values;
+
+	cudaEventSynchronize(stop);
+    cudaEventRecord(stop, 0);	    	    	
+    cudaEventSynchronize(stop);	
+
+	bool bTestResult = thrust::is_sorted(h_values.begin(), h_values.end());
+	float m1, m2, medium;
+    int x = (int)floor(size/2);
+    if(size%2 == 0){
+		m1 = h_values[x];
+		m2 = h_values[x-1];
+		medium = (m1 + m2) / 2;
+	}else{
+		medium = h_values[x];
+	}
+	if(bTestResult)
+	{
+			printf("Medium in GPU:%f\n",medium);
+			cudaEventElapsedTime(&milliseconds, start, stop);
+			printf("\tms: %f\n",milliseconds);
+	}
+	else
+		printf("No sorted\n");
 }
 //Functions called by python code, some functions implement CUBLAS and thrust
 extern "C"{
@@ -979,28 +1018,9 @@ extern "C"{
 	    printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);		      	   
 	}
 	
-   	//Calculate the medium value
+   	//Calculate the medium value   	
 	void calc_medium(size_t size, float *pos){
-	    cudaEventCreate(&start);
-	    cudaEventCreate(&stop);
-	    cudaEventRecord(start, 0);   	    
-	    thrust::sort(pos, pos + size);  
-	    float m1, m2, medium;
-	    int x = (int)floor(size/2);
-	    if(size%2 == 0){
-			m1 = pos[x];
-			m2 = pos[x-1];
-			medium = (m1 + m2) / 2;
-		}else{
-			medium = pos[x];
-		}
-		cudaEventSynchronize(stop);
-	    cudaEventRecord(stop, 0);	    	    	
-	    cudaEventSynchronize(stop);
-		printf("Medium in GPU:%f\n",medium);
-		cudaEventElapsedTime(&milliseconds, start, stop);
-		printf("\tms: %f\n",milliseconds);	    	
-
+		medium_GPU(size, pos);
 		t_ini=clock();
 	    float M = medium_CPU(size, pos);
 	    t_fin=clock();
