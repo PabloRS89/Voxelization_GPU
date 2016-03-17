@@ -43,7 +43,7 @@
 // numerical tolerances for pass/warn/fail tests
 #define TOL_WARN 1.0e-8
 #define TOL_FAIL 1.0e-4
-#define MAX_THREADS_BLOCK 1024
+#define MAX_THREADS_BLOCK 512
 
 // minimum volume allowed for test polyhedra 
 #define MIN_VOL 1.0e-8
@@ -893,7 +893,7 @@ r3d_real rand_tet_3d(r3d_rvec3 verts[4], r3d_real minvol) {
 
 //This function calculates the average of the data array over the CPU in a secuential programming
 float avg_CPU(size_t size, float *pos){
-	float avg;
+	float avg = 0;
 	int x;
 	for(x = 0; x<size; x++){
 		avg = avg + pos[x];
@@ -921,15 +921,15 @@ float medium_CPU(size_t size, float *pos){
 }
 //Calculate the standar deviation in secuential programming over CPU
 float StDev_CPU(size_t size, float *pos){
-	float medium, ed;
+	float medium = 0, ed = 0;
 	int x;
 	for(x = 0; x<size; x++){
 		medium = medium + pos[x];
 	}
-	medium = medium / size;	
+	medium = medium / size;		
 	for(x = 0; x<size; x++){
 		ed = ed + pow(pos[x]-medium, 2);
-	}
+	}	
 	ed = ed / size;
 	ed = sqrt(ed);
 	return ed;
@@ -941,21 +941,23 @@ __global__ void StDev_GPU(size_t size, float *pos, float *medium, float *ED){
 	if (idx >= size) {
         return;
     }	
-	tmp = pow(pos[idx]-*medium,2);
+    tmp = pow(pos[idx]-*medium,2);	
 	__syncthreads();
-		
+
 	atomicAdd(ED, tmp);
 	__syncthreads();
 }
+
 void medium_GPU(size_t size, float *pos){
-	cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventRecord(start, 0); 
-	
-    thrust::host_vector<float> h_keys(size);		
+	FILE *f = fopen("times_Medium.csv", "a");
+	thrust::host_vector<float> h_keys(size);		
 	for(int i=0; i<size; i++){
 		h_keys[i] = pos[i];
 	}
+	cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start, 0); 
+
 	thrust::device_vector<float> d_values = h_keys;
 	thrust::sort(d_values.begin(), d_values.end());
 	thrust::host_vector<float> h_values = d_values;
@@ -979,6 +981,8 @@ void medium_GPU(size_t size, float *pos){
 			printf("Medium in GPU:%f\n",medium);
 			cudaEventElapsedTime(&milliseconds, start, stop);
 			printf("\tms: %f\n",milliseconds);
+			fprintf(f, "%f", milliseconds);
+			fclose(f);
 	}
 	else
 		printf("No sorted\n");
@@ -988,6 +992,7 @@ extern "C"{
 	//Calculate the average of the input data ´pos´
 	void calc_avg(size_t size, float *pos){	
 		float result, *d_pos, avg_gpu, average_cpu;
+		FILE *f = fopen("times_Average.csv", "a");
 	
 		cublasCreate(&handle);
 		cudaMalloc((void **)&d_pos, size * sizeof(float));
@@ -1015,33 +1020,32 @@ extern "C"{
 	    average_cpu = avg_CPU(size, pos);	    
 	    t_fin=clock();
 	    printf("Average in CPU:%f\n", average_cpu);	    
-	    printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);		      	   
+	    printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);		
+	    fprintf(f, "%f %f\n", milliseconds, ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+		fclose(f);      	   
 	}
 	
    	//Calculate the medium value   	
 	void calc_medium(size_t size, float *pos){
 		medium_GPU(size, pos);
+		FILE *f = fopen("times_Medium.csv", "a");
 		t_ini=clock();
 	    float M = medium_CPU(size, pos);
 	    t_fin=clock();
 	    printf("Medium in CPU:%f\n",M);
 	    printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+	    fprintf(f, " %f\n", ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+		fclose(f);
 	}
 	//Calculate the standard deviation value
 	void calc_StDev(size_t size, float *pos){		
 		float result;
 		float *d_pos, *medium, *m, *SD, *sd;
 		int block, thread;
+		FILE *f = fopen("times_StDev.csv", "a");
 
-		if(size < MAX_THREADS_BLOCK)
-	    	block = size;
-	    else
-	    	block = ceil(size/MAX_THREADS_BLOCK);
-
-	    if(size < MAX_THREADS_BLOCK)
-	    	thread = size;
-	    else
-	    	thread = MAX_THREADS_BLOCK;
+		block = ceil(size/MAX_THREADS_BLOCK)+1;
+	   	thread = MAX_THREADS_BLOCK;
 
 	    dim3 BLOCK(block);
 	    dim3 THREAD(thread);
@@ -1070,7 +1074,7 @@ extern "C"{
 	    cudaEventRecord(start, 0);   	    
 	    StDev_GPU <<< BLOCK, THREAD >>> (size, d_pos, medium, SD);
 	    cudaMemcpy(sd, SD, sizeof(float), cudaMemcpyDeviceToHost);
-	    float sd_result = *sd;	    
+	    float sd_result = *sd;	    	    
 	    sd_result = sd_result / size;
 	    sd_result = sqrt(sd_result);
 	    cudaEventSynchronize(stop);
@@ -1090,11 +1094,14 @@ extern "C"{
 	    t_fin=clock();
 	    printf("Standar Deviation in CPU:%f\n",d);
 	    printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+	    fprintf(f, "%f %f\n", milliseconds, ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+		fclose(f);
 	}
 	//Calculate the minimum and maximum value existing in dataset
 	void calc_MaxMin(size_t size, float *pos){		
 		int d_max, d_min;
 		float *d_pos;    
+		FILE *f = fopen("times_maxmin.csv", "a");
 
 		cublasCreate(&handle);
 		cudaMalloc((void **)&d_pos, size * sizeof(float));
@@ -1132,6 +1139,8 @@ extern "C"{
 		printf(" - Minimum: %f\n", min);
 		printf(" - Maximun: %f\n", max);
 		printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+		fprintf(f, "%f %f\n", milliseconds, ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+		fclose(f);
 	}
 
 	void test_voxelization(){
@@ -1183,47 +1192,3 @@ extern "C"{
 		free(grid);
 	}
 }
-
-/*
-		float *d_pos, *media, *m;
-	    
-	    float milliseconds = 0;
-	    int block, thread;
-	    if(size < MAX_THREADS_BLOCK)
-	    	block = size;
-	    else
-	    	block = ceil(size/MAX_THREADS_BLOCK);
-
-	    if(size < MAX_THREADS_BLOCK)
-	    	thread = size;
-	    else
-	    	thread = MAX_THREADS_BLOCK;
-
-	    dim3 BLOCK(block);
-	    dim3 THREAD(thread);
-
-	    cudaMalloc((void **)&d_pos, size * sizeof(float));
-	    cudaMalloc((void **)&media, sizeof(float));
-	    m = (float *)malloc(sizeof(float));
-	    
-	    cudaMemcpy(d_pos, pos, size * sizeof(float), cudaMemcpyHostToDevice);
-	    cudaMemcpy(media, m, sizeof(float), cudaMemcpyHostToDevice);
-	    
-	    cudaEvent_t start, stop;
-	    cudaEventCreate(&start);
-	    cudaEventCreate(&stop);
-	    cudaEventRecord(start, 0);   	    
-	    media_GPU <<< BLOCK, THREAD >>> (size, d_pos, media);
-	    cudaEventSynchronize(stop);
-	    cudaEventRecord(stop, 0);	    	    	
-	    cudaEventSynchronize(stop);		
-	    cudaEventElapsedTime(&milliseconds, start, stop);	    
-	    cudaMemcpy(m, media, sizeof(float), cudaMemcpyDeviceToHost);	    
-	    printf("Media in GPU:%f\n",(*(float*)m));	    
-	    printf("\tms: %f\n",milliseconds);	    	
-
-	    cudaEventDestroy(start);
-	    cudaEventDestroy(stop);	  
-	    cudaFree(d_pos);  
-	    cudaFree(media);
-	    free(m);	  	 */

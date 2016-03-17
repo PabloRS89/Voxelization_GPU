@@ -41,7 +41,7 @@ s = gadget('run_600')
 #s = gadget('32Mpc_050.0256.fvol')
 #print s.pos
 
-os.system("./build.sh")
+#os.system("./build.sh")
 # extract cuda_sum function pointer in the shared object
 def get_test_vox():
     dll = ctypes.CDLL('libr3d.so', mode=ctypes.RTLD_GLOBAL)
@@ -108,10 +108,12 @@ def cuda_MaxMin(size, pos):
 # testing, sum of two arrays of ones and output head part of resulting array
 if __name__ == '__main__':    
     size=len(s.pos)*3    
-    cuda_average(size, s.pos)
+    #print size
+    #print s.pos.shape
+    #cuda_average(size, s.pos)
     cuda_medium(size, s.pos)
-    cuda_stdev(size, s.pos)
-    cuda_MaxMin(size, s.pos)    
+    #cuda_stdev(size, s.pos)    
+    #cuda_MaxMin(size, s.pos)    
 
     #print c[:]    
     #print s.pos.shape
