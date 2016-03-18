@@ -110,10 +110,10 @@ if __name__ == '__main__':
     size=len(s.pos)*3    
     #print size
     #print s.pos.shape
-    #cuda_average(size, s.pos)
+    cuda_average(size, s.pos)
     cuda_medium(size, s.pos)
-    #cuda_stdev(size, s.pos)    
-    #cuda_MaxMin(size, s.pos)    
+    cuda_stdev(size, s.pos)    
+    cuda_MaxMin(size, s.pos)    
 
     #print c[:]    
     #print s.pos.shape
