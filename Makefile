@@ -17,20 +17,29 @@
 
 CUDA      	= /usr/local/cuda-6.5
 NVCC 		= nvcc 
-NVCCFLAGS 	= -I. -arch sm_30 --compiler-options "-O3 -fPIC -malign-double -m64", --compiler-bindir=/usr/bin/g++-4.8
-LDFLAGS   	= -L$(CUDA)/lib64/
-LIBS      	= -lcuda -lcudart
+GCC 		= gcc
+NVCCFLAGS 	= -arch=sm_30 -Xcompiler -fPIC
+CFLAGS 		= -Wall
+#LDFLAGS   	= -L$(CUDA)/lib64/ -L.
+LIBS      	= -lcuda -lcudart -lcufft -lcublas
 SRC 		= r3d.cu v3d.cu
 DEPS 		= r3d.h v3d.h Makefile
 OBJ 		= $(SRC:.cu=.o)
 
-all: libr3d.so
 
-libr3d.so: $(OBJ)
-	ar -rcs $@ $^
-
-%.o: %.cu $(DEPS)
-	$(NVCC) --shared -c -o $@ $< $(NVCCFLAGS) $(LDFLAGS) $(OPT) $(LIBS)
+libr3d.so:	r3d.h  v3d.h $(SRC)
+	$(NVCC) -shared -o libr3d.so $(SRC) $(NVCCFLAGS) --compiler-options -Wall $(LIBS)
 
 clean:
-	rm -rf *.o *.so 
+	\rm -f *.o
+
+#all: libr3d.a
+
+#libr3d.so: $(OBJ)
+#	ar -rs $@ $^
+
+#%.o: %.cu $(DEPS)
+#	$(NVCC) -c -o $@ $< $(NVCCFLAGS) $(LDFLAGS) $(LIBS)
+
+#clean:
+#	rm -rf *.o *.so 

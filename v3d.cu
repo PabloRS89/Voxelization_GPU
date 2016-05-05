@@ -234,7 +234,7 @@ void r3d_get_ibox(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_rvec3 d) {
 		ibox[1].ijk[i] = ceil(rbox[1].xyz[i]/d.xyz[i]);
 	}
 }
-
+/*
 void r3d_clamp_ibox(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_dvec3 clampbox[2], r3d_rvec3 d) {
 	r3d_int i, nboxclip;
 	r3d_plane boxfaces[6];
@@ -260,4 +260,4 @@ void r3d_clamp_ibox(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_dvec3 clampbox[2], r3
 		}	
 	}
 	if(nboxclip) r3d_clip(poly, boxfaces, nboxclip);
-}
+}*/

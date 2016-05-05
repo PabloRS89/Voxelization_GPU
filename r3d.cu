@@ -34,6 +34,7 @@
 #include <thrust/detail/type_traits.h>
 #include <cuda_runtime.h>
 #include "cublas_v2.h"
+#include <cufft.h>
 
 // size of the grid
 #define NGRID 23
@@ -69,10 +70,22 @@ clock_t t_ini,t_fin;
 float milliseconds = 0;
 cudaEvent_t start, stop;	    		
 cublasHandle_t handle;
-
-
+/*
+__global__ void r3d_clip_gpu(int *test){
+	*test = *test - 10;
+}
+*/
 void r3d_clip(r3d_poly* poly, r3d_plane* planes, r3d_int nplanes) {
+	/*int *test, t;
+	t = 20;
+	printf("t:%d\n", t);
+	cudaMalloc((void**)&test, sizeof(int));
+	cudaMemcpy(test, &t, sizeof(int), cudaMemcpyHostToDevice);
+	r3d_clip_gpu<<<1,1>>>(test);
+	cudaMemcpy(&t, test, sizeof(int), cudaMemcpyDeviceToHost);
 
+	cudaFree(&test);
+	printf("t:%d\n", t);*/
 	// direct access to vertex buffer
 	r3d_vertex* vertbuffer = poly->verts; 
 	r3d_int* nverts = &poly->nverts; 
@@ -156,6 +169,10 @@ void r3d_clip(r3d_poly* poly, r3d_plane* planes, r3d_int nplanes) {
 				vertbuffer[v].pnbrs[np] = clipped[vertbuffer[v].pnbrs[np]];
 	}
 }
+/*
+void r3d_reduce_gpu(r3d_poly* poly, r3d_real* moments, r3d_int polyorder){
+
+}*/
 	
 void r3d_reduce(r3d_poly* poly, r3d_real* moments, r3d_int polyorder) {
 
@@ -894,7 +911,7 @@ r3d_real rand_tet_3d(r3d_rvec3 verts[4], r3d_real minvol) {
 //This function calculates the average of the data array over the CPU in a secuential programming
 float avg_CPU(size_t size, float *pos){
 	float avg = 0;
-	int x;
+	unsigned int x;
 	for(x = 0; x<size; x++){
 		avg = avg + pos[x];
 	}
@@ -922,7 +939,7 @@ float medium_CPU(size_t size, float *pos){
 //Calculate the standar deviation in secuential programming over CPU
 float StDev_CPU(size_t size, float *pos){
 	float medium = 0, ed = 0;
-	int x;
+	unsigned int x;
 	for(x = 0; x<size; x++){
 		medium = medium + pos[x];
 	}
@@ -949,9 +966,10 @@ __global__ void StDev_GPU(size_t size, float *pos, float *medium, float *ED){
 }
 
 void medium_GPU(size_t size, float *pos){
-	FILE *f = fopen("times_Medium.csv", "a");
+	//FILE *f = fopen("times_Medium.csv", "a");
 	thrust::host_vector<float> h_keys(size);		
-	for(int i=0; i<size; i++){
+	unsigned int i;
+	for(i=0; i<size; i++){
 		h_keys[i] = pos[i];
 	}
 	cudaEventCreate(&start);
@@ -981,18 +999,63 @@ void medium_GPU(size_t size, float *pos){
 			printf("Medium in GPU:%f\n",medium);
 			cudaEventElapsedTime(&milliseconds, start, stop);
 			printf("\tms: %f\n",milliseconds);
-			fprintf(f, "%f", milliseconds);
-			fclose(f);
+			//fprintf(f, "%f", milliseconds);
+			//fclose(f);
 	}
 	else
 		printf("No sorted\n");
 }
 //Functions called by python code, some functions implement CUBLAS and thrust
+
+__global__ void real2Complex(float *a, cufftComplex *c, size_t N){
+	int idx = blockIdx.x*blockDim.x+threadIdx.x;	
+
+	if(idx < N){
+		int index = idx * N;
+		c[index].x = a[index];		
+	}
+}
+
 extern "C"{
+	void calc_FFT(size_t size, float *pos){
+		printf("Calculando FFT\n");
+		
+		cufftComplex *h_data = (float2 *) malloc(sizeof(float2) * size);
+		cufftComplex *r_data = (float2 *) malloc(sizeof(float2) * size);
+
+		for(unsigned int i=0; i<size; i++){
+			h_data[i].x = pos[i];
+			h_data[i].y = 0;
+		}
+
+		cufftComplex *d_data;
+		cudaMalloc((void **)&d_data, size*sizeof(cufftComplex));
+		cudaMemcpy(d_data, h_data, size*sizeof(cufftComplex), cudaMemcpyHostToDevice);
+
+		cufftHandle plan;
+		cufftPlan1d(&plan, size, CUFFT_C2C, 1);
+
+		cufftExecC2C(plan, (cufftComplex *)d_data, (cufftComplex *)d_data, CUFFT_FORWARD);
+
+		cufftExecC2C(plan, (cufftComplex *)d_data, (cufftComplex *)d_data, CUFFT_INVERSE);
+
+		cudaMemcpy(r_data, d_data, size*sizeof(cufftComplex), cudaMemcpyDeviceToHost);
+
+		for(unsigned int i=0; i<size; i++){
+			pos[i] = r_data[i].x / (float)size;		
+			//pos[i] = r_data[i].x;
+		}
+
+		cufftDestroy(plan);
+		free(h_data);
+		free(r_data);
+		cudaFree(d_data);
+	}
+	
 	//Calculate the average of the input data ´pos´
 	void calc_avg(size_t size, float *pos){	
 		float result, *d_pos, avg_gpu, average_cpu;
-		FILE *f = fopen("times_Average.csv", "a");
+		//FILE *f = fopen("times_Average.csv", "a");
 	
 		cublasCreate(&handle);
 		cudaMalloc((void **)&d_pos, size * sizeof(float));
@@ -1021,28 +1084,28 @@ extern "C"{
 	    t_fin=clock();
 	    printf("Average in CPU:%f\n", average_cpu);	    
 	    printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);		
-	    fprintf(f, "%f %f\n", milliseconds, ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
-		fclose(f);      	   
+	    //fprintf(f, "%f %f\n", milliseconds, ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+		//fclose(f);      	   
 	}
 	
    	//Calculate the medium value   	
 	void calc_medium(size_t size, float *pos){
 		medium_GPU(size, pos);
-		FILE *f = fopen("times_Medium.csv", "a");
+		//FILE *f = fopen("times_Medium.csv", "a");
 		t_ini=clock();
 	    float M = medium_CPU(size, pos);
 	    t_fin=clock();
 	    printf("Medium in CPU:%f\n",M);
 	    printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
-	    fprintf(f, " %f\n", ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
-		fclose(f);
+	    //fprintf(f, " %f\n", ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+		//fclose(f);
 	}
 	//Calculate the standard deviation value
 	void calc_StDev(size_t size, float *pos){		
 		float result;
 		float *d_pos, *medium, *m, *SD, *sd;
 		int block, thread;
-		FILE *f = fopen("times_StDev.csv", "a");
+		//FILE *f = fopen("times_StDev.csv", "a");
 
 		block = ceil(size/MAX_THREADS_BLOCK)+1;
 	   	thread = MAX_THREADS_BLOCK;
@@ -1094,14 +1157,14 @@ extern "C"{
 	    t_fin=clock();
 	    printf("Standar Deviation in CPU:%f\n",d);
 	    printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
-	    fprintf(f, "%f %f\n", milliseconds, ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
-		fclose(f);
+	    //fprintf(f, "%f %f\n", milliseconds, ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+		//fclose(f);
 	}
 	//Calculate the minimum and maximum value existing in dataset
 	void calc_MaxMin(size_t size, float *pos){		
 		int d_max, d_min;
 		float *d_pos;    
-		FILE *f = fopen("times_maxmin.csv", "a");
+		//FILE *f = fopen("times_maxmin.csv", "a");
 
 		cublasCreate(&handle);
 		cudaMalloc((void **)&d_pos, size * sizeof(float));
@@ -1139,9 +1202,9 @@ extern "C"{
 		printf(" - Minimum: %f\n", min);
 		printf(" - Maximun: %f\n", max);
 		printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
-		fprintf(f, "%f %f\n", milliseconds, ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
-		fclose(f);
-	}
+		//fprintf(f, "%f %f\n", milliseconds, ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+		//fclose(f);		
+	}	
 
 	void test_voxelization(){
 		// Test r3d_voxelize() by checking that the voxelized moments
@@ -1192,3 +1255,42 @@ extern "C"{
 		free(grid);
 	}
 }
+
+/*
+void calc_FFT(size_t size, float *pos){
+		printf("Calculando FFT\n");
+		cufftHandle plan;
+		cufftComplex *data_pos;
+		cudaMalloc((void **)&data_pos, sizeof(cufftComplex)*NX*NY*NZ);
+
+		cudaMemcpy(data_pos, (cufftComplex*)pos, sizeof(cufftComplex)*NX*NY*NZ, cudaMemcpyHostToDevice);
+
+		cufftPlan3d(&plan, NX, NY, NZ, CUFFT_C2C);
+
+		cufftExecC2C(plan, data_pos, data_pos, CUFFT_FORWARD);		
+		
+    	cudaMemcpy(pos, data_pos, sizeof(cufftComplex)*NX*NY*NZ, cudaMemcpyDeviceToHost);  
+    	cudaDevideSincronize();
+
+		cufftDestroy(plan);
+		cudaFree(data_pos);
+	}
+
+	void cufft_inverse(size_t size, float *pos){
+		printf("Calculando FFT inversa\n");
+		cufftHandle plan;
+		cufftComplex *data_pos;
+		cudaMalloc((void **)&data_pos, sizeof(cufftComplex)*NX*NY*NZ);
+
+		cudaMemcpy(data_pos, (cufftComplex*)pos, sizeof(cufftComplex)*NX*NY*NZ, cudaMemcpyHostToDevice);
+
+		cufftPlan3d(&plan, NX, NY, NZ, CUFFT_C2C);
+
+		cufftExecC2C(plan, data_pos, data_pos, CUFFT_INVERSE);		
+		
+    	cudaMemcpy(pos, data_pos, sizeof(cufftComplex)*NX*NY*NZ, cudaMemcpyDeviceToHost);  
+    	cudaDevideSincronize();
+		cufftDestroy(plan);
+		cudaFree(data_pos);
+	}
+*/
