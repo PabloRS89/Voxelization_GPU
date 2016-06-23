@@ -1,12 +1,8 @@
 /*
- *  
- *		r3d.c
- *		
+ *		r3d.c		
  *		See r3d.h for usage.
- *		
  *		Devon Powell
  *		31 August 2015
- *
  *		This program was prepared by Los Alamos National Security, LLC at Los Alamos National
  *		Laboratory (LANL) under contract No. DE-AC52-06NA25396 with the U.S. Department of Energy (DOE). 
  *		All rights in the program are reserved by the DOE and Los Alamos National Security, LLC.  
@@ -14,9 +10,7 @@
  *		this Notice and any statement of authorship are reproduced on all copies.  Neither the U.S. 
  *		Government nor LANS makes any warranty, express or implied, or assumes any liability 
  *		or responsibility for the use of this software.
- *
  */
-
 #include "r3d.h"
 #include "v3d.h"
 #include <string.h>
@@ -70,11 +64,7 @@ clock_t t_ini,t_fin;
 float milliseconds = 0;
 cudaEvent_t start, stop;	    		
 cublasHandle_t handle;
-/*
-__global__ void r3d_clip_gpu(int *test){
-	*test = *test - 10;
-}
-*/
+
 void r3d_clip(r3d_poly* poly, r3d_plane* planes, r3d_int nplanes) {
 	/*int *test, t;
 	t = 20;
@@ -92,8 +82,7 @@ void r3d_clip(r3d_poly* poly, r3d_plane* planes, r3d_int nplanes) {
 	if(*nverts <= 0) return;
 
 	// variable declarations
-	r3d_int v, p, np, onv, vcur, vnext, vstart, 
-			pnext, numunclipped;
+	r3d_int v, p, np, onv, vcur, vnext, vstart, pnext, numunclipped;
 
 	// signed distances to the clipping plane
 	r3d_real sdists[R3D_MAX_VERTS];
@@ -104,7 +93,6 @@ void r3d_clip(r3d_poly* poly, r3d_plane* planes, r3d_int nplanes) {
 
 	// loop over each clip plane
 	for(p = 0; p < nplanes; ++p) {
-
 		// calculate signed distances to the clip plane
 		onv = *nverts;
 		smin = 1.0e30;
@@ -132,9 +120,7 @@ void r3d_clip(r3d_poly* poly, r3d_plane* planes, r3d_int nplanes) {
 				if(!clipped[vnext]) continue;
 				vertbuffer[*nverts].pnbrs[0] = vcur;
 				vertbuffer[vcur].pnbrs[np] = *nverts;
-				wav(vertbuffer[vcur].pos, -sdists[vnext],
-					vertbuffer[vnext].pos, sdists[vcur],
-					vertbuffer[*nverts].pos);
+				wav(vertbuffer[vcur].pos, -sdists[vnext], vertbuffer[vnext].pos, sdists[vcur], vertbuffer[*nverts].pos);
 				(*nverts)++;
 			}
 		}
@@ -169,13 +155,8 @@ void r3d_clip(r3d_poly* poly, r3d_plane* planes, r3d_int nplanes) {
 				vertbuffer[v].pnbrs[np] = clipped[vertbuffer[v].pnbrs[np]];
 	}
 }
-/*
-void r3d_reduce_gpu(r3d_poly* poly, r3d_real* moments, r3d_int polyorder){
-
-}*/
 	
 void r3d_reduce(r3d_poly* poly, r3d_real* moments, r3d_int polyorder) {
-
 	// var declarations
 	r3d_real sixv;
 	r3d_int np, m, i, j, k, corder;
@@ -233,13 +214,11 @@ void r3d_reduce(r3d_poly* poly, r3d_real* moments, r3d_int polyorder) {
 			v2 = vertbuffer[vcur].pos;
 			v1 = vertbuffer[vnext].pos;
 	
-			sixv = (-v2.x*v1.y*v0.z + v1.x*v2.y*v0.z + v2.x*v0.y*v1.z
-				   	- v0.x*v2.y*v1.z - v1.x*v0.y*v2.z + v0.x*v1.y*v2.z); 
+			sixv = (-v2.x*v1.y*v0.z + v1.x*v2.y*v0.z + v2.x*v0.y*v1.z - v0.x*v2.y*v1.z - v1.x*v0.y*v2.z + v0.x*v1.y*v2.z); 			
 
 			// calculate the moments
 			// using the fast recursive method of Koehl (2012)
 			// essentially building a set of trinomial pyramids, one layer at a time
-
 			// base case
 			S[0][0][prevlayer] = 1.0;
 			D[0][0][prevlayer] = 1.0;
@@ -276,7 +255,6 @@ void r3d_reduce(r3d_poly* poly, r3d_real* moments, r3d_int polyorder) {
 				curlayer = 1 - curlayer;
 				prevlayer = 1 - prevlayer;
 			}
-
 			// move to the next edge
 			for(np = 0; np < 3; ++np) if(vertbuffer[vnext].pnbrs[np] == vcur) break;
 			vcur = vnext;
@@ -332,7 +310,6 @@ r3d_int r3d_is_good(r3d_poly* poly) {
 				return 0;
 			}
 		}
-
 		vct[vertbuffer[v].pnbrs[0]]++;
 		vct[vertbuffer[v].pnbrs[1]]++;
 		vct[vertbuffer[v].pnbrs[2]]++;
@@ -347,7 +324,6 @@ r3d_int r3d_is_good(r3d_poly* poly) {
 
 	// check for 3-vertex-connectedness
 	// this is O(nverts^2)
-
 	// handle multiply-connected polyhedra by testing each 
 	// component separately. Flood-fill starting from each vertex
 	// to give each connected region a unique ID.
@@ -408,7 +384,6 @@ r3d_int r3d_is_good(r3d_poly* poly) {
 			}
 		}
 	}	
-
 	return 1;
 }
 
@@ -470,8 +445,6 @@ void r3d_affine(r3d_poly* poly, r3d_real mat[4][4]) {
 }
 
 void r3d_init_tet(r3d_poly* poly, r3d_rvec3 verts[4]) {		
-	//*c = *a + *b;int *a, int *b, int *c
-
 	// direct access to vertex buffer
 	r3d_vertex* vertbuffer = poly->verts; 
 	r3d_int* nverts = &poly->nverts; 
@@ -480,13 +453,16 @@ void r3d_init_tet(r3d_poly* poly, r3d_rvec3 verts[4]) {
 	*nverts = 4;
 	vertbuffer[0].pnbrs[0] = 1;	
 	vertbuffer[0].pnbrs[1] = 3;	
-	vertbuffer[0].pnbrs[2] = 2;	
+	vertbuffer[0].pnbrs[2] = 2;
+
 	vertbuffer[1].pnbrs[0] = 2;	
 	vertbuffer[1].pnbrs[1] = 3;	
 	vertbuffer[1].pnbrs[2] = 0;	
+
 	vertbuffer[2].pnbrs[0] = 0;	
 	vertbuffer[2].pnbrs[1] = 3;	
 	vertbuffer[2].pnbrs[2] = 1;	
+	
 	vertbuffer[3].pnbrs[0] = 1;	
 	vertbuffer[3].pnbrs[1] = 2;	
 	vertbuffer[3].pnbrs[2] = 0;	
@@ -494,11 +470,9 @@ void r3d_init_tet(r3d_poly* poly, r3d_rvec3 verts[4]) {
 	// copy vertex coordinates
 	r3d_int v;
 	for(v = 0; v < 4; ++v) vertbuffer[v].pos = verts[v];
-
 }
 
 void r3d_init_box(r3d_poly* poly, r3d_rvec3 rbounds[2]) {
-
 	// direct access to vertex buffer
 	r3d_vertex* vertbuffer = poly->verts; 
 	r3d_int* nverts = &poly->nverts; 
@@ -552,12 +526,9 @@ void r3d_init_box(r3d_poly* poly, r3d_rvec3 rbounds[2]) {
 	vertbuffer[7].pos.x = rbounds[0].x; 
 	vertbuffer[7].pos.y = rbounds[1].y; 
 	vertbuffer[7].pos.z = rbounds[1].z; 
-
 }
 
-void r3d_init_poly(r3d_poly* poly, r3d_rvec3* vertices, r3d_int numverts, 
-					r3d_int** faceinds, r3d_int* numvertsperface, r3d_int numfaces) {
-
+void r3d_init_poly(r3d_poly* poly, r3d_rvec3* vertices, r3d_int numverts, r3d_int** faceinds, r3d_int* numvertsperface, 	r3d_int numfaces) {
 	// dummy vars
 	r3d_int v, vprev, vcur, vnext, f, np;
 
@@ -586,16 +557,13 @@ void r3d_init_poly(r3d_poly* poly, r3d_rvec3* vertices, r3d_int numverts,
 	if(minvperf < 3) return;
 
 	if(maxvperf == 3) {
-
 		// simple case with no need for duplicate vertices
-
 		// read in vertex locations
 		*nverts = numverts;
 		for(v = 0; v < *nverts; ++v) {
 			vertbuffer[v].pos = vertices[v];
 			for(np = 0; np < 3; ++np) vertbuffer[v].pnbrs[np] = R3D_MAX_VERTS;
-		}
-	
+		}	
 		// build graph connectivity by correctly orienting half-edges for each vertex 
 		for(f = 0; f < numfaces; ++f) {
 			for(v = 0; v < numvertsperface[f]; ++v) {
@@ -620,7 +588,6 @@ void r3d_init_poly(r3d_poly* poly, r3d_rvec3* vertices, r3d_int numverts,
 		}
 	}
 	else {
-
 		// we need to create duplicate, degenerate vertices to account for more than
 		// three edges per vertex. This is complicated.
 
@@ -646,7 +613,6 @@ void r3d_init_poly(r3d_poly* poly, r3d_rvec3* vertices, r3d_int numverts,
 				++(*nverts);
 			}	
 		}
-
 		// fill in connectivity for all duplicates
 		memset(&util, 0, sizeof(util));
 		for(f = 0; f < numfaces; ++f) {
@@ -659,7 +625,6 @@ void r3d_init_poly(r3d_poly* poly, r3d_rvec3* vertices, r3d_int numverts,
 				vbtmp[vcur].pnbrs[2] = vprev;
 			}
 		}
-
 		// link degenerate duplicates, putting them in the correct order
 		// use util to mark and avoid double-processing verts
 		memset(&util, 0, sizeof(util));
@@ -674,15 +639,13 @@ void r3d_init_poly(r3d_poly* poly, r3d_rvec3* vertices, r3d_int numverts,
 				}
 			}
 		}
-
 		// complete vertex pairs
 		memset(&util, 0, sizeof(util));
 		for(v0 = 0; v0 < numverts; ++v0)
 		for(v1 = v0 + 1; v1 < numverts; ++v1) {
 			for(v00 = vstart[v0]; v00 < vstart[v0] + eperv[v0]; ++v00)
 			for(v11 = vstart[v1]; v11 < vstart[v1] + eperv[v1]; ++v11) {
-				if(vbtmp[v00].pnbrs[1] == v1 && vbtmp[v11].pnbrs[1] == v0 
-						&& !util[v00] && !util[v11]) {
+				if(vbtmp[v00].pnbrs[1] == v1 && vbtmp[v11].pnbrs[1] == v0 && !util[v00] && !util[v11]) {
 					vbtmp[v00].pnbrs[1] = v11;
 					vbtmp[v11].pnbrs[1] = v00;
 					util[v00] = 1;
@@ -690,7 +653,6 @@ void r3d_init_poly(r3d_poly* poly, r3d_rvec3* vertices, r3d_int numverts,
 				}
 			}
 		}
-
 		// remove unnecessary dummy vertices
 		memset(&util, 0, sizeof(util));
 		for(v = 0; v < numverts; ++v) {
@@ -707,7 +669,6 @@ void r3d_init_poly(r3d_poly* poly, r3d_rvec3* vertices, r3d_int numverts,
 			util[v0] = 1;
 			util[v1] = 1;
 		}
-
 		// copy to the real vertbuffer and compress
 		numunclipped = 0;
 		for(v = 0; v < *nverts; ++v) {
@@ -725,48 +686,36 @@ void r3d_init_poly(r3d_poly* poly, r3d_rvec3* vertices, r3d_int numverts,
 
 void r3d_tet_faces_from_verts(r3d_plane* faces, r3d_rvec3* verts) {
 	r3d_rvec3 tmpcent;
-	faces[0].n.x = ((verts[3].y - verts[1].y)*(verts[2].z - verts[1].z) 
-			- (verts[2].y - verts[1].y)*(verts[3].z - verts[1].z));
-	faces[0].n.y = ((verts[2].x - verts[1].x)*(verts[3].z - verts[1].z) 
-			- (verts[3].x - verts[1].x)*(verts[2].z - verts[1].z));
-	faces[0].n.z = ((verts[3].x - verts[1].x)*(verts[2].y - verts[1].y) 
-			- (verts[2].x - verts[1].x)*(verts[3].y - verts[1].y));
+	faces[0].n.x = ((verts[3].y - verts[1].y)*(verts[2].z - verts[1].z) - (verts[2].y - verts[1].y)*(verts[3].z - verts[1].z));
+	faces[0].n.y = ((verts[2].x - verts[1].x)*(verts[3].z - verts[1].z) - (verts[3].x - verts[1].x)*(verts[2].z - verts[1].z));
+	faces[0].n.z = ((verts[3].x - verts[1].x)*(verts[2].y - verts[1].y) - (verts[2].x - verts[1].x)*(verts[3].y - verts[1].y));
 	norm(faces[0].n);
 	tmpcent.x = ONE_THIRD*(verts[1].x + verts[2].x + verts[3].x);
 	tmpcent.y = ONE_THIRD*(verts[1].y + verts[2].y + verts[3].y);
 	tmpcent.z = ONE_THIRD*(verts[1].z + verts[2].z + verts[3].z);
 	faces[0].d = -dot(faces[0].n, tmpcent);
 
-	faces[1].n.x = ((verts[2].y - verts[0].y)*(verts[3].z - verts[2].z) 
-			- (verts[2].y - verts[3].y)*(verts[0].z - verts[2].z));
-	faces[1].n.y = ((verts[3].x - verts[2].x)*(verts[2].z - verts[0].z) 
-			- (verts[0].x - verts[2].x)*(verts[2].z - verts[3].z));
-	faces[1].n.z = ((verts[2].x - verts[0].x)*(verts[3].y - verts[2].y) 
-			- (verts[2].x - verts[3].x)*(verts[0].y - verts[2].y));
+	faces[1].n.x = ((verts[2].y - verts[0].y)*(verts[3].z - verts[2].z) - (verts[2].y - verts[3].y)*(verts[0].z - verts[2].z));
+	faces[1].n.y = ((verts[3].x - verts[2].x)*(verts[2].z - verts[0].z) - (verts[0].x - verts[2].x)*(verts[2].z - verts[3].z));
+	faces[1].n.z = ((verts[2].x - verts[0].x)*(verts[3].y - verts[2].y) - (verts[2].x - verts[3].x)*(verts[0].y - verts[2].y));
 	norm(faces[1].n);
 	tmpcent.x = ONE_THIRD*(verts[2].x + verts[3].x + verts[0].x);
 	tmpcent.y = ONE_THIRD*(verts[2].y + verts[3].y + verts[0].y);
 	tmpcent.z = ONE_THIRD*(verts[2].z + verts[3].z + verts[0].z);
 	faces[1].d = -dot(faces[1].n, tmpcent);
 
-	faces[2].n.x = ((verts[1].y - verts[3].y)*(verts[0].z - verts[3].z) 
-			- (verts[0].y - verts[3].y)*(verts[1].z - verts[3].z));
-	faces[2].n.y = ((verts[0].x - verts[3].x)*(verts[1].z - verts[3].z) 
-			- (verts[1].x - verts[3].x)*(verts[0].z - verts[3].z));
-	faces[2].n.z = ((verts[1].x - verts[3].x)*(verts[0].y - verts[3].y) 
-			- (verts[0].x - verts[3].x)*(verts[1].y - verts[3].y));
+	faces[2].n.x = ((verts[1].y - verts[3].y)*(verts[0].z - verts[3].z) - (verts[0].y - verts[3].y)*(verts[1].z - verts[3].z));
+	faces[2].n.y = ((verts[0].x - verts[3].x)*(verts[1].z - verts[3].z) - (verts[1].x - verts[3].x)*(verts[0].z - verts[3].z));
+	faces[2].n.z = ((verts[1].x - verts[3].x)*(verts[0].y - verts[3].y) - (verts[0].x - verts[3].x)*(verts[1].y - verts[3].y));
 	norm(faces[2].n);
 	tmpcent.x = ONE_THIRD*(verts[3].x + verts[0].x + verts[1].x);
 	tmpcent.y = ONE_THIRD*(verts[3].y + verts[0].y + verts[1].y);
 	tmpcent.z = ONE_THIRD*(verts[3].z + verts[0].z + verts[1].z);
 	faces[2].d = -dot(faces[2].n, tmpcent);
 
-	faces[3].n.x = ((verts[0].y - verts[2].y)*(verts[1].z - verts[0].z) 
-			- (verts[0].y - verts[1].y)*(verts[2].z - verts[0].z));
-	faces[3].n.y = ((verts[1].x - verts[0].x)*(verts[0].z - verts[2].z) 
-			- (verts[2].x - verts[0].x)*(verts[0].z - verts[1].z));
-	faces[3].n.z = ((verts[0].x - verts[2].x)*(verts[1].y - verts[0].y) 
-			- (verts[0].x - verts[1].x)*(verts[2].y - verts[0].y));
+	faces[3].n.x = ((verts[0].y - verts[2].y)*(verts[1].z - verts[0].z) - (verts[0].y - verts[1].y)*(verts[2].z - verts[0].z));
+	faces[3].n.y = ((verts[1].x - verts[0].x)*(verts[0].z - verts[2].z) - (verts[2].x - verts[0].x)*(verts[0].z - verts[1].z));
+	faces[3].n.z = ((verts[0].x - verts[2].x)*(verts[1].y - verts[0].y) - (verts[0].x - verts[1].x)*(verts[2].y - verts[0].y));
 	norm(faces[3].n);
 	tmpcent.x = ONE_THIRD*(verts[0].x + verts[1].x + verts[2].x);
 	tmpcent.y = ONE_THIRD*(verts[0].y + verts[1].y + verts[2].y);
@@ -783,16 +732,13 @@ void r3d_box_faces_from_verts(r3d_plane* faces, r3d_rvec3* rbounds) {
 	faces[5].n.x = -1.0; faces[5].n.y = 0.0; faces[5].n.z = 0.0; faces[5].d = rbounds[1].x; 
 }
 
-void r3d_poly_faces_from_verts(r3d_plane* faces, r3d_rvec3* vertices, r3d_int numverts, 
-						r3d_int** faceinds, r3d_int* numvertsperface, r3d_int numfaces) {
-
+void r3d_poly_faces_from_verts(r3d_plane* faces, r3d_rvec3* vertices, r3d_int numverts, r3d_int** faceinds, r3d_int* numvertsperface, r3d_int numfaces) {
 	// dummy vars
 	r3d_int v, f;
 	r3d_rvec3 p0, p1, p2, centroid;
 
 	// calculate a centroid and a unit normal for each face 
 	for(f = 0; f < numfaces; ++f) {
-
 		centroid.x = 0.0;
 		centroid.y = 0.0;
 		centroid.z = 0.0;
@@ -801,7 +747,6 @@ void r3d_poly_faces_from_verts(r3d_plane* faces, r3d_rvec3* vertices, r3d_int nu
 		faces[f].n.z = 0.0;
 		
 		for(v = 0; v < numvertsperface[f]; ++v) {
-
 			// add cross product of edges to the total normal
 			p0 = vertices[faceinds[f][v]];
 			p1 = vertices[faceinds[f][(v+1)%numvertsperface[v]]];
@@ -809,13 +754,11 @@ void r3d_poly_faces_from_verts(r3d_plane* faces, r3d_rvec3* vertices, r3d_int nu
 			faces[f].n.x += (p1.y - p0.y)*(p2.z - p0.z) - (p1.z - p0.z)*(p2.y - p0.y);
 			faces[f].n.y += (p1.z - p0.z)*(p2.x - p0.x) - (p1.x - p0.x)*(p2.z - p0.z);
 			faces[f].n.z += (p1.x - p0.x)*(p2.y - p0.y) - (p1.y - p0.y)*(p2.x - p0.x);
-
 			// add the vertex position to the centroid
 			centroid.x += p0.x;
 			centroid.y += p0.y;
 			centroid.z += p0.z;
 		}
-
 		// normalize the normals and set the signed distance to origin
 		centroid.x /= numvertsperface[f];
 		centroid.y /= numvertsperface[f];
@@ -829,25 +772,27 @@ r3d_real r3d_orient(r3d_rvec3* verts) {
 	r3d_real adx, bdx, cdx;
 	r3d_real ady, bdy, cdy;
 	r3d_real adz, bdz, cdz;
-	adx = verts[0].x - verts[3].x;
+	adx = verts[0].x - verts[3].x;	
 	bdx = verts[1].x - verts[3].x;
-	cdx = verts[2].x - verts[3].x;
-	ady = verts[0].y - verts[3].y;
-	bdy = verts[1].y - verts[3].y;
-	cdy = verts[2].y - verts[3].y;
-	adz = verts[0].z - verts[3].z;
-	bdz = verts[1].z - verts[3].z;
-	cdz = verts[2].z - verts[3].z;
-	return -ONE_SIXTH*(adx * (bdy * cdz - bdz * cdy)
-			+ bdx * (cdy * adz - cdz * ady)
-			+ cdx * (ady * bdz - adz * bdy));
+	cdx = verts[2].x - verts[3].x;	
+	ady = verts[0].y - verts[3].y;	
+	bdy = verts[1].y - verts[3].y;	
+	cdy = verts[2].y - verts[3].y;	
+	adz = verts[0].z - verts[3].z;	
+	bdz = verts[1].z - verts[3].z;	
+	cdz = verts[2].z - verts[3].z;	
+
+	//printf("%f\n", (adx*bdy*cdz)+(bdx*cdy*adz)+(cdx*ady*bdz)-(cdx*bdy*adz)-(bdx*ady*cdz)-(adx*cdy*bdz));
+
+	return -ONE_SIXTH*(adx * (bdy * cdz - bdz * cdy)+ bdx * (cdy * adz - cdz * ady)+ cdx * (ady * bdz - adz * bdy));
 }
 
 void r3d_print(r3d_poly* poly) {
 	r3d_int v;
 	for(v = 0; v < poly->nverts; ++v) {
 		printf("  vertex %d: pos = ( %.10e , %.10e , %.10e ), nbrs = %d %d %d\n", 
-				v, poly->verts[v].pos.x, poly->verts[v].pos.y, poly->verts[v].pos.z, poly->verts[v].pnbrs[0], poly->verts[v].pnbrs[1], poly->verts[v].pnbrs[2]);
+			v, poly->verts[v].pos.x, poly->verts[v].pos.y, poly->verts[v].pos.z, 
+			poly->verts[v].pnbrs[0], poly->verts[v].pnbrs[1], poly->verts[v].pnbrs[2]);
 	}
 }
 
@@ -875,7 +820,6 @@ double rand_normal() {
 	double u1 = rand_uniform();
 	double u2 = rand_uniform();
 	return sqrt(-2.0*log(u1))*cos(6.28318530718*u2);
-	//return sqrt(-2.0*log(u1))*sin(TWOPI*u2);
 }
 
 r3d_rvec3 rand_uvec_3d() {
@@ -894,9 +838,10 @@ r3d_real rand_tet_3d(r3d_rvec3 verts[4], r3d_real minvol) {
 	r3d_int v;
 	r3d_rvec3 swp;
 	r3d_real tetvol = 0.0;
-	while(tetvol < minvol) {
-		for(v = 0; v < 4; ++v) 
-			verts[v] = rand_uvec_3d();
+	while(tetvol < minvol) {		
+		for(v = 0; v < 4; ++v) {
+			verts[v] = rand_uvec_3d();				
+		}
 		tetvol = r3d_orient(verts);
 		if(tetvol < 0.0) {
 			swp = verts[2];
@@ -904,11 +849,11 @@ r3d_real rand_tet_3d(r3d_rvec3 verts[4], r3d_real minvol) {
 			verts[3] = swp;
 			tetvol = -tetvol;
 		}
-	}
+	}		
 	return tetvol;
 }
 
-//This function calculates the average of the data array over the CPU in a secuential programming
+//This function calculates the average of the data array over the CPU in a sequential programming
 float avg_CPU(size_t size, float *pos){
 	float avg = 0;
 	unsigned int x;
@@ -922,7 +867,7 @@ float avg_CPU(size_t size, float *pos){
 int compare(const void *a, const void *b) {
     return ( *(int*)a - *(int*)b );
 }
-//Function which calculates the medium value of the dataset in a secuential programming using qsort algorithm
+//Function which calculates the medium value of the dataset in a sequential programming using qsort algorithm
 float medium_CPU(size_t size, float *pos){
 	float medium, medium1, medium2;
 	int x = (int)floor(size/2);
@@ -936,7 +881,7 @@ float medium_CPU(size_t size, float *pos){
 	}		
 	return medium;
 }
-//Calculate the standar deviation in secuential programming over CPU
+//Calculate the standard deviation in sequential programming over CPU
 float StDev_CPU(size_t size, float *pos){
 	float medium = 0, ed = 0;
 	unsigned int x;
@@ -951,16 +896,15 @@ float StDev_CPU(size_t size, float *pos){
 	ed = sqrt(ed);
 	return ed;
 }
-//Calculate the standar deviation in secuential programming over GPU
+//Calculate the standard deviation in sequential programming over GPU
 __global__ void StDev_GPU(size_t size, float *pos, float *medium, float *ED){		
 	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;	
 	float tmp;
 	if (idx >= size) {
-        return;
-    }	
-    tmp = pow(pos[idx]-*medium,2);	
+ 		return;
+   	}	
+    	tmp = pow(pos[idx]-*medium,2);	
 	__syncthreads();
-
 	atomicAdd(ED, tmp);
 	__syncthreads();
 }
@@ -973,21 +917,21 @@ void medium_GPU(size_t size, float *pos){
 		h_keys[i] = pos[i];
 	}
 	cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventRecord(start, 0); 
+	cudaEventCreate(&stop);
+	cudaEventRecord(start, 0); 
 
 	thrust::device_vector<float> d_values = h_keys;
 	thrust::sort(d_values.begin(), d_values.end());
 	thrust::host_vector<float> h_values = d_values;
 
 	cudaEventSynchronize(stop);
-    cudaEventRecord(stop, 0);	    	    	
-    cudaEventSynchronize(stop);	
+	cudaEventRecord(stop, 0);	    	    	
+	cudaEventSynchronize(stop);	
 
 	bool bTestResult = thrust::is_sorted(h_values.begin(), h_values.end());
 	float m1, m2, medium;
-    int x = (int)floor(size/2);
-    if(size%2 == 0){
+    	int x = (int)floor(size/2);
+    	if(size%2 == 0){
 		m1 = h_values[x];
 		m2 = h_values[x-1];
 		medium = (m1 + m2) / 2;
@@ -996,16 +940,15 @@ void medium_GPU(size_t size, float *pos){
 	}
 	if(bTestResult)
 	{
-			printf("Medium in GPU:%f\n",medium);
-			cudaEventElapsedTime(&milliseconds, start, stop);
-			printf("\tms: %f\n",milliseconds);
-			//fprintf(f, "%f", milliseconds);
-			//fclose(f);
+		printf("Medium in GPU:%f\n",medium);
+		cudaEventElapsedTime(&milliseconds, start, stop);
+		printf("\tms: %f\n",milliseconds);
+		//fprintf(f, "%f", milliseconds);
+		//fclose(f);
 	}
 	else
 		printf("No sorted\n");
 }
-//Functions called by python code, some functions implement CUBLAS and thrust
 
 __global__ void real2Complex(float *a, cufftComplex *c, size_t N){
 	int idx = blockIdx.x*blockDim.x+threadIdx.x;	
@@ -1018,14 +961,14 @@ __global__ void real2Complex(float *a, cufftComplex *c, size_t N){
 
 extern "C"{
 	void calc_FFT(size_t size, float *pos){
-		printf("Calculando FFT\n");
-		
+		//printf("Calculando FFT\n");
+		//FILE *f = fopen("FFT.csv", "a");
 		cufftComplex *h_data = (float2 *) malloc(sizeof(float2) * size);
 		cufftComplex *r_data = (float2 *) malloc(sizeof(float2) * size);
 
 		for(unsigned int i=0; i<size; i++){
-			h_data[i].x = pos[i];
-			h_data[i].y = 0;
+			h_data[i].x = i;
+			h_data[i].y = pos[i];
 		}
 
 		cufftComplex *d_data;
@@ -1035,21 +978,35 @@ extern "C"{
 		cufftHandle plan;
 		cufftPlan1d(&plan, size, CUFFT_C2C, 1);
 
+		cudaEventCreate(&start);
+		cudaEventCreate(&stop);
+		cudaEventRecord(start, 0);
+
 		cufftExecC2C(plan, (cufftComplex *)d_data, (cufftComplex *)d_data, CUFFT_FORWARD);
 
-		cufftExecC2C(plan, (cufftComplex *)d_data, (cufftComplex *)d_data, CUFFT_INVERSE);
+		cudaEventSynchronize(stop);
+		cudaEventRecord(stop, 0);	    	    	
+		cudaEventSynchronize(stop);		
+		cudaEventElapsedTime(&milliseconds, start, stop);
+
+		//cufftExecC2C(plan, (cufftComplex *)d_data, (cufftComplex *)d_data, CUFFT_INVERSE);
 
 		cudaMemcpy(r_data, d_data, size*sizeof(cufftComplex), cudaMemcpyDeviceToHost);
-
-		for(unsigned int i=0; i<size; i++){
+		
+		for(unsigned int i=0; i<10; i++){
 			pos[i] = r_data[i].x / (float)size;		
 			//pos[i] = r_data[i].x;
+			//printf("%f, %f\n", r_data[i].x, r_data[i].y);
 		}
 
 		cufftDestroy(plan);
-		free(h_data);
-		free(r_data);
+		free(h_data);		
 		cudaFree(d_data);
+
+		printf("CUFFT:\n");
+		printf("\tms: %f\n",milliseconds);
+		//printf(f, "%f\n", milliseconds);
+		//fclose(f);		
 	}
 	
 	//Calculate the average of the input data ´pos´
@@ -1062,15 +1019,15 @@ extern "C"{
 		cudaMemcpy(d_pos, pos, size * sizeof(float), cudaMemcpyHostToDevice);
 
 		cudaEventCreate(&start);
-	    cudaEventCreate(&stop);
-	    cudaEventRecord(start, 0);
+		cudaEventCreate(&stop);
+		cudaEventRecord(start, 0);
 
 		cublasSasum(handle, size, d_pos, 1, &result);		
 		avg_gpu = result/size;
 
 		cudaEventSynchronize(stop);
-	    cudaEventRecord(stop, 0);	    	    	
-	    cudaEventSynchronize(stop);		
+		cudaEventRecord(stop, 0);	    	    	
+		cudaEventSynchronize(stop);		
 		cudaEventElapsedTime(&milliseconds, start, stop);
 
 		cudaFree(d_pos);
@@ -1080,11 +1037,11 @@ extern "C"{
 		printf("\tms: %f\n",milliseconds);
 
 		t_ini=clock();	    
-	    average_cpu = avg_CPU(size, pos);	    
-	    t_fin=clock();
-	    printf("Average in CPU:%f\n", average_cpu);	    
-	    printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);		
-	    //fprintf(f, "%f %f\n", milliseconds, ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+		average_cpu = avg_CPU(size, pos);	    
+		t_fin=clock();
+		printf("Average in CPU:%f\n", average_cpu);	    
+		printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);		
+		//fprintf(f, "%f %f\n", milliseconds, ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
 		//fclose(f);      	   
 	}
 	
@@ -1093,11 +1050,11 @@ extern "C"{
 		medium_GPU(size, pos);
 		//FILE *f = fopen("times_Medium.csv", "a");
 		t_ini=clock();
-	    float M = medium_CPU(size, pos);
-	    t_fin=clock();
-	    printf("Medium in CPU:%f\n",M);
-	    printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
-	    //fprintf(f, " %f\n", ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+		float M = medium_CPU(size, pos);
+		t_fin=clock();
+		printf("Medium in CPU:%f\n",M);
+		printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+		//fprintf(f, " %f\n", ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
 		//fclose(f);
 	}
 	//Calculate the standard deviation value
@@ -1110,8 +1067,8 @@ extern "C"{
 		block = ceil(size/MAX_THREADS_BLOCK)+1;
 	   	thread = MAX_THREADS_BLOCK;
 
-	    dim3 BLOCK(block);
-	    dim3 THREAD(thread);
+		dim3 BLOCK(block);
+		dim3 THREAD(thread);
 
 		cublasCreate(&handle);
 		cudaMalloc((void **)&d_pos, size * sizeof(float));
@@ -1122,42 +1079,42 @@ extern "C"{
 		cudaFree(d_pos);
 		cublasDestroy(handle);					
 
-	    cudaMalloc((void **)&d_pos, size * sizeof(float));
-	    cudaMalloc((void **)&medium, sizeof(float));
-	    cudaMalloc((void **)&SD, sizeof(float));
-	    m = (float *)malloc(sizeof(float));
-	    sd = (float *)malloc(sizeof(float));	    
-	    *m = result/size;
-	    cudaMemcpy(d_pos, pos, size * sizeof(float), cudaMemcpyHostToDevice);
-	    cudaMemcpy(medium, m, sizeof(float), cudaMemcpyHostToDevice);
-	    cudaMemcpy(SD, sd, sizeof(float), cudaMemcpyHostToDevice);
-	    	  
-	    cudaEventCreate(&start);
-	    cudaEventCreate(&stop);
-	    cudaEventRecord(start, 0);   	    
-	    StDev_GPU <<< BLOCK, THREAD >>> (size, d_pos, medium, SD);
-	    cudaMemcpy(sd, SD, sizeof(float), cudaMemcpyDeviceToHost);
-	    float sd_result = *sd;	    	    
-	    sd_result = sd_result / size;
-	    sd_result = sqrt(sd_result);
-	    cudaEventSynchronize(stop);
-	    cudaEventRecord(stop, 0);	    	    	
-	    cudaEventSynchronize(stop);
-	    cudaEventElapsedTime(&milliseconds, start, stop);	    	    	    	    
-	    printf("Standar Deviation in GPU:%f\n",sd_result);	    
-	    printf("\tms: %f\n",milliseconds);	    
-	    cudaEventDestroy(start);
-	    cudaEventDestroy(stop);	  
-	    cudaFree(d_pos);  
-	    cudaFree(medium);
-	    free(m);
+		cudaMalloc((void **)&d_pos, size * sizeof(float));
+		cudaMalloc((void **)&medium, sizeof(float));
+		cudaMalloc((void **)&SD, sizeof(float));
+		m = (float *)malloc(sizeof(float));
+		sd = (float *)malloc(sizeof(float));	    
+		*m = result/size;
+		cudaMemcpy(d_pos, pos, size * sizeof(float), cudaMemcpyHostToDevice);
+		cudaMemcpy(medium, m, sizeof(float), cudaMemcpyHostToDevice);
+		cudaMemcpy(SD, sd, sizeof(float), cudaMemcpyHostToDevice);
+			  
+		cudaEventCreate(&start);
+		cudaEventCreate(&stop);
+		cudaEventRecord(start, 0);   	    
+		StDev_GPU <<< BLOCK, THREAD >>> (size, d_pos, medium, SD);
+		cudaMemcpy(sd, SD, sizeof(float), cudaMemcpyDeviceToHost);
+		float sd_result = *sd;	    	    
+		sd_result = sd_result / size;
+		sd_result = sqrt(sd_result);
+		cudaEventSynchronize(stop);
+		cudaEventRecord(stop, 0);	    	    	
+		cudaEventSynchronize(stop);
+		cudaEventElapsedTime(&milliseconds, start, stop);	    	    	    	    
+		printf("Standar Deviation in GPU:%f\n",sd_result);	    
+		printf("\tms: %f\n",milliseconds);	    
+		cudaEventDestroy(start);
+		cudaEventDestroy(stop);	  
+		cudaFree(d_pos);  
+		cudaFree(medium);
+		free(m);
 		
 		t_ini=clock();
-	    float d = StDev_CPU(size, pos);
-	    t_fin=clock();
-	    printf("Standar Deviation in CPU:%f\n",d);
-	    printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
-	    //fprintf(f, "%f %f\n", milliseconds, ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+		float d = StDev_CPU(size, pos);
+		t_fin=clock();
+		printf("Standar Deviation in CPU:%f\n",d);
+		printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
+		//fprintf(f, "%f %f\n", milliseconds, ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
 		//fclose(f);
 	}
 	//Calculate the minimum and maximum value existing in dataset
@@ -1171,15 +1128,15 @@ extern "C"{
 		cudaMemcpy(d_pos, pos, size * sizeof(float), cudaMemcpyHostToDevice);
 
 		cudaEventCreate(&start);
-	    cudaEventCreate(&stop);
-	    cudaEventRecord(start, 0);
+	   	cudaEventCreate(&stop);
+	   	cudaEventRecord(start, 0);
 		
 		cublasIsamax(handle, size, d_pos,1,&d_max);
 		cublasIsamin(handle, size, d_pos,1,&d_min);
 
 		cudaEventSynchronize(stop);
-	    cudaEventRecord(stop, 0);	    	    	
-	    cudaEventSynchronize(stop);		
+	    	cudaEventRecord(stop, 0);	    	    	
+	    	cudaEventSynchronize(stop);		
 		cudaEventElapsedTime(&milliseconds, start, stop);		
 
 		cudaFree(d_pos);
@@ -1220,11 +1177,13 @@ extern "C"{
 
 		// create a random tet in the unit box
 		rand_tet_3d(verts, MIN_VOL);
-		for(v = 0; v < 4; ++v)
-		for(i = 0; i < 3; ++i) {
-			verts[v].xyz[i] += 1.0;
-			verts[v].xyz[i] *= 0.5;
+		for(v = 0; v < 4; ++v){
+			for(i = 0; i < 3; ++i) {
+				verts[v].xyz[i] += 1.0;		
+				verts[v].xyz[i] *= 0.5;
+			}
 		}
+
 		r3d_init_tet(&poly, verts);
 
 		// get its original moments for reference
@@ -1238,8 +1197,10 @@ extern "C"{
 		printf("Minimum index box = %d %d %d to %d %d %d\n", ibox[0].i, ibox[0].j, ibox[0].k, ibox[1].i, ibox[1].j, ibox[1].k);
 		r3d_int nvoxels = (ibox[1].i-ibox[0].i)*(ibox[1].j-ibox[0].j)*(ibox[1].k-ibox[0].k);
 		r3d_real* grid = (r3d_real*)calloc(nvoxels*nmom, sizeof(r3d_real));
+		r3d_print(&poly);
 		r3d_voxelize(&poly, ibox, grid, dx, POLY_ORDER);
-		
+		printf("\n\n");
+		r3d_print(&poly);
 		// make sure the sum of each moment equals the original 
 		for(curorder = 0, mind = 0; curorder <= POLY_ORDER; ++curorder) {
 			printf("Order = %d\n", curorder);
@@ -1255,42 +1216,3 @@ extern "C"{
 		free(grid);
 	}
 }
-
-/*
-void calc_FFT(size_t size, float *pos){
-		printf("Calculando FFT\n");
-		cufftHandle plan;
-		cufftComplex *data_pos;
-		cudaMalloc((void **)&data_pos, sizeof(cufftComplex)*NX*NY*NZ);
-
-		cudaMemcpy(data_pos, (cufftComplex*)pos, sizeof(cufftComplex)*NX*NY*NZ, cudaMemcpyHostToDevice);
-
-		cufftPlan3d(&plan, NX, NY, NZ, CUFFT_C2C);
-
-		cufftExecC2C(plan, data_pos, data_pos, CUFFT_FORWARD);		
-		
-    	cudaMemcpy(pos, data_pos, sizeof(cufftComplex)*NX*NY*NZ, cudaMemcpyDeviceToHost);  
-    	cudaDevideSincronize();
-
-		cufftDestroy(plan);
-		cudaFree(data_pos);
-	}
-
-	void cufft_inverse(size_t size, float *pos){
-		printf("Calculando FFT inversa\n");
-		cufftHandle plan;
-		cufftComplex *data_pos;
-		cudaMalloc((void **)&data_pos, sizeof(cufftComplex)*NX*NY*NZ);
-
-		cudaMemcpy(data_pos, (cufftComplex*)pos, sizeof(cufftComplex)*NX*NY*NZ, cudaMemcpyHostToDevice);
-
-		cufftPlan3d(&plan, NX, NY, NZ, CUFFT_C2C);
-
-		cufftExecC2C(plan, data_pos, data_pos, CUFFT_INVERSE);		
-		
-    	cudaMemcpy(pos, data_pos, sizeof(cufftComplex)*NX*NY*NZ, cudaMemcpyDeviceToHost);  
-    	cudaDevideSincronize();
-		cufftDestroy(plan);
-		cudaFree(data_pos);
-	}
-*/

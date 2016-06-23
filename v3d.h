@@ -1,10 +1,7 @@
 /*
- *
  *		v3d.h
- *
  *		Routines for voxelizing (analytic volume sampling) 
  *		polyhedra to a regular Cartesian grid using r3d. 
- *		
  *		Devon Powell
  *		15 October 2015
  *
@@ -40,7 +37,6 @@
  *		royalty-free perpetual license to install, use, modify, prepare derivative works, 
  *		incorporate into other computer software, distribute, and sublicense such Enhancements or 
  *		derivative works thereof, in binary and source code form.
- *		
  */
 
 #ifndef _V3D_H_
@@ -79,25 +75,6 @@
  *
  */
 void r3d_voxelize(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_real* dest_grid, r3d_rvec3 d, r3d_int polyorder);
-
-/**
- * \brief Get the minimal box of grid indices for a polyhedron, given a grid cell spacing,
- * also clamping it to a user-specified range while clipping the polyhedron to that range.
- *
- * \param [in] poly 
- * The polyhedron for which to calculate the index box and clip.
- *
- * \param [in, out] ibox 
- * Minimal range of grid indices covered by the polyhedron.
- *
- * \param [in, out] clampbox 
- * Range of grid indices to which to clamp and clip `ibox` and `poly`, respectively. 
- *
- * \param [in] d 
- * The cell spacing of the grid. The origin of the grid is assumed to lie at the origin in space.
- *
- */
-void r3d_clamp_ibox(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_dvec3 clampbox[2], r3d_rvec3 d);
 
 /**
  * \brief Get the minimal box of grid indices for a polyhedron, given a grid cell spacing.

@@ -1,9 +1,6 @@
 /*
- *
  *  	v3d.c
- *
  *  	See v3d.h for usage.
- *
  *  	Devon Powell
  *  	15 October 2015
  *
@@ -39,7 +36,6 @@
  *		royalty-free perpetual license to install, use, modify, prepare derivative works, 
  *		incorporate into other computer software, distribute, and sublicense such Enhancements or 
  *		derivative works thereof, in binary and source code form.
- *
  */
 
 #include "v3d.h"
@@ -57,7 +53,7 @@
 // TODO: make this a generic "split" routine that just takes a plane.
 void r3d_split(r3d_poly* inpoly, r3d_poly** outpolys, r3d_real coord, r3d_int ax);
 
-void r3d_voxelize(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_real* dest_grid, r3d_rvec3 d, r3d_int polyorder) {
+void r3d_voxelize(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_real* dest_grid, r3d_rvec3 d, r3d_int polyorder) {	
 	r3d_int i, m, spax, dmax, nstack, siz;
 	r3d_int nmom = R3D_NUM_MOMENTS(polyorder);
 	r3d_real moments[nmom];
@@ -66,8 +62,7 @@ void r3d_voxelize(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_real* dest_grid, r3d_rv
 
 	// return if any parameters are bad 
 	for(i = 0; i < 3; ++i) gridsz.ijk[i] = ibox[1].ijk[i]-ibox[0].ijk[i];	
-	if(!poly || poly->nverts <= 0 || !dest_grid || 
-			gridsz.i <= 0 || gridsz.j <= 0 || gridsz.k <= 0) return;
+	if(!poly || poly->nverts <= 0 || !dest_grid || gridsz.i <= 0 || gridsz.j <= 0 || gridsz.k <= 0) return;
 	
 	// explicit stack-based implementation
 	// stack size should never overflow in this implementation, 
@@ -84,7 +79,6 @@ void r3d_voxelize(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_real* dest_grid, r3d_rv
 	memcpy(stack[nstack].ibox, ibox, 2*sizeof(r3d_dvec3));
 	nstack++;
 	while(nstack > 0) {
-
 		// pop the stack
 		// if the leaf is empty, skip it
 		--nstack;
@@ -107,8 +101,7 @@ void r3d_voxelize(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_real* dest_grid, r3d_rv
 			r3d_reduce(&stack[nstack].poly, moments, polyorder);
 			// TODO: cell shifting for accuracy
 			for(m = 0; m < nmom; ++m)
-				dest_grid[gind(stack[nstack].ibox[0].i, stack[nstack].ibox[0].j, 
-						stack[nstack].ibox[0].k, m)] += moments[m];
+				dest_grid[gind(stack[nstack].ibox[0].i, stack[nstack].ibox[0].j, stack[nstack].ibox[0].k, m)] += moments[m];
 			continue;
 		}
 
@@ -124,7 +117,6 @@ void r3d_voxelize(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_real* dest_grid, r3d_rv
 }
 
 void r3d_split(r3d_poly* inpoly, r3d_poly** outpolys, r3d_real coord, r3d_int ax) {
-
 	// direct access to vertex buffer
 	if(inpoly->nverts <= 0) return;
 	r3d_int* nverts = &inpoly->nverts;
@@ -137,8 +129,7 @@ void r3d_split(r3d_poly* inpoly, r3d_poly** outpolys, r3d_real coord, r3d_int ax
 	// calculate signed distances to the clip plane
 	nright = 0;
 	memset(&side, 0, sizeof(side));
-	for(v = 0; v < *nverts; ++v) {
-			//sdists[v] = splane.d + r3d_dot(vertbuffer[v].pos, splane.n);
+	for(v = 0; v < *nverts; ++v) {			
 		sdists[v] = coord - vertbuffer[v].pos.xyz[ax];
 		if(sdists[v] < 0.0) {
 			side[v] = 1;
@@ -165,9 +156,7 @@ void r3d_split(r3d_poly* inpoly, r3d_poly** outpolys, r3d_real coord, r3d_int ax
 		for(np = 0; np < 3; ++np) {
 			vnext = vertbuffer[vcur].pnbrs[np];
 			if(!side[vnext]) continue;
-			wav(vertbuffer[vcur].pos, -sdists[vnext],
-				vertbuffer[vnext].pos, sdists[vcur],
-				newpos);
+			wav(vertbuffer[vcur].pos, -sdists[vnext], vertbuffer[vnext].pos, sdists[vcur], newpos);
 			vertbuffer[*nverts].pos = newpos;
 			vertbuffer[*nverts].pnbrs[0] = vcur;
 			vertbuffer[vcur].pnbrs[np] = *nverts;
@@ -234,30 +223,3 @@ void r3d_get_ibox(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_rvec3 d) {
 		ibox[1].ijk[i] = ceil(rbox[1].xyz[i]/d.xyz[i]);
 	}
 }
-/*
-void r3d_clamp_ibox(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_dvec3 clampbox[2], r3d_rvec3 d) {
-	r3d_int i, nboxclip;
-	r3d_plane boxfaces[6];
-	nboxclip = 0;
-	memset(boxfaces, 0, sizeof(boxfaces));
-	for(i = 0; i < 3; ++i) {
-		if(ibox[1].ijk[i] <= clampbox[0].ijk[i] || ibox[0].ijk[i] >= clampbox[1].ijk[i]) {
-			memset(ibox, 0, sizeof(ibox));
-			poly->nverts = 0;
-			return;
-		}
-		if(ibox[0].ijk[i] < clampbox[0].ijk[i]) {
-			ibox[0].ijk[i] = clampbox[0].ijk[i];
-			boxfaces[nboxclip].d = -clampbox[0].ijk[i]*d.xyz[i];
-			boxfaces[nboxclip].n.xyz[i] = 1.0;
-			nboxclip++;
-		}
-		if(ibox[1].ijk[i] > clampbox[1].ijk[i]) {
-			ibox[1].ijk[i] = clampbox[1].ijk[i];
-			boxfaces[nboxclip].d = clampbox[1].ijk[i]*d.xyz[i];
-			boxfaces[nboxclip].n.xyz[i] = -1.0;
-			nboxclip++;
-		}	
-	}
-	if(nboxclip) r3d_clip(poly, boxfaces, nboxclip);
-}*/
