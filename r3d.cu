@@ -1,4 +1,4 @@
-/*
+	/*
  *		r3d.c		
  *		See r3d.h for usage.
  *		Devon Powell
@@ -12,9 +12,10 @@
  *		or responsibility for the use of this software.
  */
 #include "r3d.h"
-#include "v3d.h"
+ #include "cur3d.h"
 #include <string.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -43,9 +44,21 @@
 // minimum volume allowed for test polyhedra 
 #define MIN_VOL 1.0e-8
 
+ // forward declarations
+__global__ void cur3d_vox_kernel(cur3d_element* elems, r3d_int nelem, r3d_real* rho, r3d_dvec3 n, r3d_rvec3 d);
+__host__ void cur3d_err(cudaError_t err);
+__device__ r3d_real cur3d_clip_and_reduce(cur3d_element tet, r3d_dvec3 gidx, r3d_rvec3 d);
+__device__ void cur3du_cumsum(r3d_int* arr);
+__device__ void cur3du_get_aabb(cur3d_element tet, r3d_dvec3 n, r3d_rvec3 d, r3d_dvec3 &vmin, r3d_dvec3 &vmax);
+__device__ r3d_int cur3du_num_clip(cur3d_element tet, r3d_dvec3 gidx, r3d_rvec3 d);
+__device__ void r3d_init_box(r3d_poly* poly, r3d_rvec3 rbounds[2]);
+__device__ r3d_real cur3du_orient(cur3d_element tet);
+__device__ void r3d_tet_faces_from_verts(r3d_plane* faces, r3d_rvec3* verts);
+
 // useful macros
 #define ONE_THIRD 0.333333333333333333333333333333333333333333333333333333
 #define ONE_SIXTH 0.16666666666666666666666666666666666666666666666666666667
+ #define CLIP_MASK 0x80
 #define dot(va, vb) (va.x*vb.x + va.y*vb.y + va.z*vb.z)
 #define wav(va, wa, vb, wb, vr) {			\
 	vr.x = (wa*va.x + wb*vb.x)/(wa + wb);	\
@@ -65,223 +78,474 @@ float milliseconds = 0;
 cudaEvent_t start, stop;	    		
 cublasHandle_t handle;
 
-void r3d_clip(r3d_poly* poly, r3d_plane* planes, r3d_int nplanes) {
-	/*int *test, t;
-	t = 20;
-	printf("t:%d\n", t);
-	cudaMalloc((void**)&test, sizeof(int));
-	cudaMemcpy(test, &t, sizeof(int), cudaMemcpyHostToDevice);
-	r3d_clip_gpu<<<1,1>>>(test);
-	cudaMemcpy(&t, test, sizeof(int), cudaMemcpyDeviceToHost);
-
-	cudaFree(&test);
-	printf("t:%d\n", t);*/
-	// direct access to vertex buffer
-	r3d_vertex* vertbuffer = poly->verts; 
-	r3d_int* nverts = &poly->nverts; 
-	if(*nverts <= 0) return;
-
-	// variable declarations
-	r3d_int v, p, np, onv, vcur, vnext, vstart, pnext, numunclipped;
-
-	// signed distances to the clipping plane
-	r3d_real sdists[R3D_MAX_VERTS];
-	r3d_real smin, smax;
-
-	// for marking clipped vertices
-	r3d_int clipped[R3D_MAX_VERTS];
-
-	// loop over each clip plane
-	for(p = 0; p < nplanes; ++p) {
-		// calculate signed distances to the clip plane
-		onv = *nverts;
-		smin = 1.0e30;
-		smax = -1.0e30;
-		memset(&clipped, 0, sizeof(clipped));
-		for(v = 0; v < onv; ++v) {
-			sdists[v] = planes[p].d + dot(vertbuffer[v].pos, planes[p].n);
-			if(sdists[v] < smin) smin = sdists[v];
-			if(sdists[v] > smax) smax = sdists[v];
-			if(sdists[v] < 0.0) clipped[v] = 1;
-		}
-
-		// skip this face if the poly lies entirely on one side of it 
-		if(smin >= 0.0) continue;
-		if(smax <= 0.0) {
-			*nverts = 0;
-			return;
-		}
-
-		// check all edges and insert new vertices on the bisected edges 
-		for(vcur = 0; vcur < onv; ++vcur) {
-			if(clipped[vcur]) continue;
-			for(np = 0; np < 3; ++np) {
-				vnext = vertbuffer[vcur].pnbrs[np];
-				if(!clipped[vnext]) continue;
-				vertbuffer[*nverts].pnbrs[0] = vcur;
-				vertbuffer[vcur].pnbrs[np] = *nverts;
-				wav(vertbuffer[vcur].pos, -sdists[vnext], vertbuffer[vnext].pos, sdists[vcur], vertbuffer[*nverts].pos);
-				(*nverts)++;
-			}
-		}
-
-		// for each new vert, search around the faces for its new neighbors
-		// and doubly-link everything
-		for(vstart = onv; vstart < *nverts; ++vstart) {
-			vcur = vstart;
-			vnext = vertbuffer[vcur].pnbrs[0];
-			do {
-				for(np = 0; np < 3; ++np) if(vertbuffer[vnext].pnbrs[np] == vcur) break;
-				vcur = vnext;
-				pnext = (np+1)%3;
-				vnext = vertbuffer[vcur].pnbrs[pnext];
-			} while(vcur < onv);
-			vertbuffer[vstart].pnbrs[2] = vcur;
-			vertbuffer[vcur].pnbrs[1] = vstart;
-		}
-
-		// go through and compress the vertex list, removing clipped verts
-		// and re-indexing accordingly (reusing `clipped` to re-index everything)
-		numunclipped = 0;
-		for(v = 0; v < *nverts; ++v) {
-			if(!clipped[v]) {
-				vertbuffer[numunclipped] = vertbuffer[v];
-				clipped[v] = numunclipped++;
-			}
-		}
-		*nverts = numunclipped;
-		for(v = 0; v < *nverts; ++v) 
-			for(np = 0; np < 3; ++np)
-				vertbuffer[v].pnbrs[np] = clipped[vertbuffer[v].pnbrs[np]];
+__host__ void cur3d_err(cudaError_t err) {
+	if (err != cudaSuccess) {
+		printf("%s\n", cudaGetErrorString(err));
+		//exit(0);
 	}
 }
-	
-void r3d_reduce(r3d_poly* poly, r3d_real* moments, r3d_int polyorder) {
+
+// for re-indexing row-major voxel corners
+__constant__ r3d_int cur3d_vv[8] = {0, 4, 3, 7, 1, 5, 2, 6};
+
+__device__ r3d_real cur3d_reduce(r3d_poly* poly) {
+
 	// var declarations
-	r3d_real sixv;
-	r3d_int np, m, i, j, k, corder;
-	r3d_int vstart, pstart, vcur, vnext, pnext;
+	r3d_real locvol;
+	unsigned char v, np;
+	unsigned char vcur, vnext, pnext, vstart;
 	r3d_rvec3 v0, v1, v2; 
 
 	// direct access to vertex buffer
 	r3d_vertex* vertbuffer = poly->verts; 
 	r3d_int* nverts = &poly->nverts; 
-
-	// zero the moments
-	for(m = 0; m < R3D_NUM_MOMENTS(polyorder); ++m)
-		moments[m] = 0.0;
-
-	if(*nverts <= 0) return;
 	
-	// for keeping track of which edges have been visited
-	r3d_int emarks[*nverts][3];
-	memset(&emarks, 0, sizeof(emarks));
+	// for keeping track of which edges have been traversed
+	unsigned char emarks[R3D_MAX_VERTS][3];
+	memset((void*) &emarks, 0, sizeof(emarks));
 
-	// Storage for coefficients
-	// keep two layers of the pyramid of coefficients
-	// Note: Uses twice as much space as needed, but indexing is faster this way
-	r3d_int prevlayer = 0;
-	r3d_int curlayer = 1;
-	r3d_real S[polyorder+1][polyorder+1][2];
-	r3d_real D[polyorder+1][polyorder+1][2];
-	r3d_real C[polyorder+1][polyorder+1][2];
+	// stack for edges
+	r3d_int nvstack;
+	unsigned char vstack[2*R3D_MAX_VERTS];
 
-	// loop over all vertices to find the starting point for each face
-	for(vstart = 0; vstart < *nverts; ++vstart)
-	for(pstart = 0; pstart < 3; ++pstart) {
+	// find the first unclipped vertex
+	vcur = R3D_MAX_VERTS;
+	for(v = 0; vcur == R3D_MAX_VERTS && v < *nverts; ++v) 
+		if(!(vertbuffer[v].orient.fflags & CLIP_MASK)) vcur = v;
 	
-		// skip this face if we have marked it
-		if(emarks[vstart][pstart]) continue;
+	// return if all vertices have been clipped
+	if(vcur == R3D_MAX_VERTS) return 0.0;
+
+	locvol = 0;
+
+	// stack implementation
+	nvstack = 0;
+	vstack[nvstack++] = vcur;
+	vstack[nvstack++] = 0;
+
+	while(nvstack > 0) {
+		
+		// get the next unmarked edge
+		do {
+			pnext = vstack[--nvstack];
+			vcur = vstack[--nvstack];
+		} while(emarks[vcur][pnext] && nvstack > 0);
+		if(emarks[vcur][pnext] && nvstack == 0) break; 
 
 		// initialize face looping
-		pnext = pstart; 
-		vcur = vstart; 
 		emarks[vcur][pnext] = 1;
+		vstart = vcur;
+		v0 = vertbuffer[vstart].pos;
 		vnext = vertbuffer[vcur].pnbrs[pnext];
-		v0 = vertbuffer[vcur].pos;
-	
+		vstack[nvstack++] = vcur;
+		vstack[nvstack++] = (pnext+1)%3;
+
 		// move to the second edge
 		for(np = 0; np < 3; ++np) if(vertbuffer[vnext].pnbrs[np] == vcur) break;
 		vcur = vnext;
 		pnext = (np+1)%3;
 		emarks[vcur][pnext] = 1;
 		vnext = vertbuffer[vcur].pnbrs[pnext];
-	
+		vstack[nvstack++] = vcur;
+		vstack[nvstack++] = (pnext+1)%3;
+
 		// make a triangle fan using edges
 		// and first vertex
 		while(vnext != vstart) {
-	
+
 			v2 = vertbuffer[vcur].pos;
 			v1 = vertbuffer[vnext].pos;
-	
-			sixv = (-v2.x*v1.y*v0.z + v1.x*v2.y*v0.z + v2.x*v0.y*v1.z - v0.x*v2.y*v1.z - v1.x*v0.y*v2.z + v0.x*v1.y*v2.z); 			
 
-			// calculate the moments
-			// using the fast recursive method of Koehl (2012)
-			// essentially building a set of trinomial pyramids, one layer at a time
-			// base case
-			S[0][0][prevlayer] = 1.0;
-			D[0][0][prevlayer] = 1.0;
-			C[0][0][prevlayer] = 1.0;
-			moments[0] += ONE_SIXTH*sixv;
+			locvol += ONE_SIXTH*(-(v2.x*v1.y*v0.z) + v1.x*v2.y*v0.z + v2.x*v0.y*v1.z
+				   	- v0.x*v2.y*v1.z - v1.x*v0.y*v2.z + v0.x*v1.y*v2.z); 
 
-			// build up successive polynomial orders
-			for(corder = 1, m = 1; corder <= polyorder; ++corder) {
-				for(i = corder; i >= 0; --i)
-				for(j = corder - i; j >= 0; --j, ++m) {
-					k = corder - i - j;
-					C[i][j][curlayer] = 0; 
-					D[i][j][curlayer] = 0;  
-					S[i][j][curlayer] = 0;  
-					if(i > 0) {
-						C[i][j][curlayer] += v2.x*C[i-1][j][prevlayer];
-						D[i][j][curlayer] += v1.x*D[i-1][j][prevlayer]; 
-						S[i][j][curlayer] += v0.x*S[i-1][j][prevlayer]; 
-					}
-					if(j > 0) {
-						C[i][j][curlayer] += v2.y*C[i][j-1][prevlayer];
-						D[i][j][curlayer] += v1.y*D[i][j-1][prevlayer]; 
-						S[i][j][curlayer] += v0.y*S[i][j-1][prevlayer]; 
-					}
-					if(k > 0) {
-						C[i][j][curlayer] += v2.z*C[i][j][prevlayer]; 
-						D[i][j][curlayer] += v1.z*D[i][j][prevlayer]; 
-						S[i][j][curlayer] += v0.z*S[i][j][prevlayer]; 
-					}
-					D[i][j][curlayer] += C[i][j][curlayer]; 
-					S[i][j][curlayer] += D[i][j][curlayer]; 
-					moments[m] += sixv*S[i][j][curlayer];
-				}
-				curlayer = 1 - curlayer;
-				prevlayer = 1 - prevlayer;
-			}
 			// move to the next edge
 			for(np = 0; np < 3; ++np) if(vertbuffer[vnext].pnbrs[np] == vcur) break;
 			vcur = vnext;
 			pnext = (np+1)%3;
 			emarks[vcur][pnext] = 1;
 			vnext = vertbuffer[vcur].pnbrs[pnext];
+			vstack[nvstack++] = vcur;
+			vstack[nvstack++] = (pnext+1)%3;
 		}
 	}
-
-	// reuse C to recursively compute the leading multinomial coefficients
-	C[0][0][prevlayer] = 1.0;
-	for(corder = 1, m = 1; corder <= polyorder; ++corder) {
-		for(i = corder; i >= 0; --i)
-		for(j = corder - i; j >= 0; --j, ++m) {
-			k = corder - i - j;
-			C[i][j][curlayer] = 0.0; 
-			if(i > 0) C[i][j][curlayer] += C[i-1][j][prevlayer];
-			if(j > 0) C[i][j][curlayer] += C[i][j-1][prevlayer];
-			if(k > 0) C[i][j][curlayer] += C[i][j][prevlayer]; 
-			moments[m] /= C[i][j][curlayer]*(corder+1)*(corder+2)*(corder+3);
-		}
-		curlayer = 1 - curlayer;
-		prevlayer = 1 - prevlayer;
-	}
+	return locvol;
 }
 
-r3d_int r3d_is_good(r3d_poly* poly) {
+
+__device__ r3d_real cur3d_clip_and_reduce(cur3d_element tet, r3d_dvec3 gidx, r3d_rvec3 d) {
+
+	//r3d_real moments[10];
+	r3d_poly poly;
+	r3d_plane faces[4];
+	r3d_real gor;
+	r3d_rvec3 rbounds[2] = {
+		{-0.5*d.x, -0.5*d.y, -0.5*d.z}, 
+		{0.5*d.x, 0.5*d.y, 0.5*d.z} 
+	};
+	r3d_int v, f, ii, jj, kk;
+	r3d_real tetvol;
+	r3d_rvec3 gpt;
+	unsigned char andcmp;
+
+	tetvol = cur3du_orient(tet);
+	if(tetvol < 0.0) {
+		gpt = tet.pos[2];
+		tet.pos[2] = tet.pos[3];
+		tet.pos[3] = gpt;
+		tetvol = -tetvol;
+	}
+	r3d_tet_faces_from_verts(faces, tet.pos);
+
+	// test the voxel against tet faces
+	for(ii = 0; ii < 2; ++ii)
+	for(jj = 0; jj < 2; ++jj)
+	for(kk = 0; kk < 2; ++kk) {
+		gpt.x = (ii + gidx.i)*d.x; gpt.y = (jj + gidx.j)*d.y; gpt.z = (kk + gidx.k)*d.z;
+		v = cur3d_vv[4*ii + 2*jj + kk];
+		poly.verts[v].orient.fflags = 0x00;
+		for(f = 0; f < 4; ++f) {
+			gor = faces[f].d + dot(gpt, faces[f].n);
+			if(gor > 0.0) poly.verts[v].orient.fflags |= (1 << f);
+			poly.verts[v].orient.fdist[f] = gor;
+		}
+	}
+
+	andcmp = 0x0f;
+	for(v = 0; v < 8; ++v) 
+		andcmp &= poly.verts[v].orient.fflags;
+
+	r3d_init_box(&poly, rbounds);
+
+	//// CLIP /////
+
+	// variable declarations
+	r3d_int nvstack;
+	unsigned char vstack[4*R3D_MAX_VERTS];
+	unsigned char ff, np, vcur, vprev, firstnewvert, prevnewvert;
+	unsigned char fmask, ffmask;
+
+	// direct access to vertex buffer
+	r3d_vertex* vertbuffer = poly.verts; 
+	r3d_int* nverts = &poly.nverts; 
+			
+	for(f = 0; f < 4; ++f) {
+
+		// go to the next active clip face
+		fmask = (1 << f);
+		while((andcmp & fmask) && f < 4)
+			fmask = (1 << ++f);
+		if(f == 4) break;
+
+		// find the first vertex lying outside of the face
+		// only need to find one (taking advantage of convexity)
+		vcur = R3D_MAX_VERTS;
+		for(v = 0; vcur == R3D_MAX_VERTS && v < *nverts; ++v) 
+			if(!(vertbuffer[v].orient.fflags & (CLIP_MASK | fmask))) vcur = v;
+		if(vcur == R3D_MAX_VERTS) continue; // TODO: can we do better here in terms of warp divergence?
+		
+		// push the first three edges and mark the starting vertex
+		// as having been clipped
+		nvstack = 0;
+		vstack[nvstack++] = vcur;
+		vstack[nvstack++] = vertbuffer[vcur].pnbrs[1];
+		vstack[nvstack++] = vcur;
+		vstack[nvstack++] = vertbuffer[vcur].pnbrs[0];
+		vstack[nvstack++] = vcur;
+		vstack[nvstack++] = vertbuffer[vcur].pnbrs[2];
+		vertbuffer[vcur].orient.fflags |= CLIP_MASK;
+		firstnewvert = *nverts;
+		prevnewvert = R3D_MAX_VERTS; 
+
+		// traverse edges and clip
+		// this is ordered very carefully to preserve edge connectivity
+		while(nvstack > 0) {
+
+			// get the next unclipped vertex
+			do {
+				vcur = vstack[--nvstack];
+				vprev = vstack[--nvstack];
+			} while((vertbuffer[vcur].orient.fflags & CLIP_MASK) && nvstack > 0);
+			if((vertbuffer[vcur].orient.fflags & CLIP_MASK) && nvstack == 0) break; 
+
+			// check whether this vertex is inside the face
+			// if so, clip the edge and push the new vertex to vertbuffer
+			if(vertbuffer[vcur].orient.fflags & fmask) {
+
+				// compute the intersection point using a weighted
+				// average of perpendicular distances to the plane
+				wav(vertbuffer[vcur].pos, -vertbuffer[vprev].orient.fdist[f],
+					vertbuffer[vprev].pos, vertbuffer[vcur].orient.fdist[f],
+					vertbuffer[*nverts].pos);
+
+				// doubly link to vcur
+				for(np = 0; np < 3; ++np) if(vertbuffer[vcur].pnbrs[np] == vprev) break;
+				vertbuffer[vcur].pnbrs[np] = *nverts;
+				vertbuffer[*nverts].pnbrs[0] = vcur;
+
+				// doubly link to previous new vert
+				vertbuffer[*nverts].pnbrs[2] = prevnewvert; 
+				vertbuffer[prevnewvert].pnbrs[1] = *nverts;
+
+				// do face intersections and flags
+				vertbuffer[*nverts].orient.fflags = 0x00;
+				for(ff = f + 1; ff < 4; ++ff) {
+
+					// TODO: might not need this one...
+					/*ffmask = (1 << ff);*/
+					/*while((andcmp & ffmask) && ff < 4)*/
+						/*ffmask = (1 << ++ff);*/
+					/*if(ff == 4) break;*/
+
+					// skip if all verts are inside ff
+					ffmask = (1 << ff); 
+					if(andcmp & ffmask) continue;
+
+					// weighted average keeps us in a relative coordinate system
+					vertbuffer[*nverts].orient.fdist[ff] = 
+							(vertbuffer[vprev].orient.fdist[ff]*vertbuffer[vcur].orient.fdist[f] 
+							- vertbuffer[vprev].orient.fdist[f]*vertbuffer[vcur].orient.fdist[ff])
+							/(vertbuffer[vcur].orient.fdist[f] - vertbuffer[vprev].orient.fdist[f]);
+					if(vertbuffer[*nverts].orient.fdist[ff] > 0.0) vertbuffer[*nverts].orient.fflags |= ffmask;
+				}
+
+				prevnewvert = (*nverts)++;
+			}
+			else {
+
+				// otherwise, determine the left and right vertices
+				// (ordering is important) and push to the traversal stack
+				for(np = 0; np < 3; ++np) if(vertbuffer[vcur].pnbrs[np] == vprev) break;
+
+				// mark the vertex as having been clipped
+				vertbuffer[vcur].orient.fflags |= CLIP_MASK;
+
+				// push the next verts to the stack
+				vstack[nvstack++] = vcur;
+				vstack[nvstack++] = vertbuffer[vcur].pnbrs[(np+2)%3];
+				vstack[nvstack++] = vcur;
+				vstack[nvstack++] = vertbuffer[vcur].pnbrs[(np+1)%3];
+			}
+		}
+
+		// close the clipped face
+		vertbuffer[firstnewvert].pnbrs[2] = *nverts-1;
+		vertbuffer[prevnewvert].pnbrs[1] = firstnewvert;
+	}
+
+	////// REDUCE ///////
+
+#if 0
+	// var declarations
+	r3d_real locvol;
+	unsigned char m;
+	unsigned char vnext, pnext, vstart;
+	r3d_rvec3 v0, v1, v2; 
+
+	r3d_int polyorder = 0;
+	
+	// for keeping track of which edges have been traversed
+	unsigned char emarks[R3D_MAX_VERTS][3];
+	memset((void*) &emarks, 0, sizeof(emarks));
+
+	// zero the moments
+	for(m = 0; m < 10; ++m)
+		moments[m] = 0.0;
+
+	// find the first unclipped vertex
+	vcur = R3D_MAX_VERTS;
+	for(v = 0; vcur == R3D_MAX_VERTS && v < *nverts; ++v) 
+		if(!(vertbuffer[v].orient.fflags & CLIP_MASK)) vcur = v;
+	
+	// return if all vertices have been clipped
+	if(vcur == R3D_MAX_VERTS) return 0.0;
+
+	// stack implementation
+	nvstack = 0;
+	vstack[nvstack++] = vcur;
+	vstack[nvstack++] = 0;
+
+	while(nvstack > 0) {
+		
+		pnext = vstack[--nvstack];
+		vcur = vstack[--nvstack];
+
+		// skip this edge if we have marked it
+		if(emarks[vcur][pnext]) continue;
+
+
+		// initialize face looping
+		emarks[vcur][pnext] = 1;
+		vstart = vcur;
+		v0 = vertbuffer[vstart].pos;
+		vnext = vertbuffer[vcur].pnbrs[pnext];
+		vstack[nvstack++] = vcur;
+		vstack[nvstack++] = (pnext+1)%3;
+
+		// move to the second edge
+		for(np = 0; np < 3; ++np) if(vertbuffer[vnext].pnbrs[np] == vcur) break;
+		vcur = vnext;
+		pnext = (np+1)%3;
+		emarks[vcur][pnext] = 1;
+		vnext = vertbuffer[vcur].pnbrs[pnext];
+		vstack[nvstack++] = vcur;
+		vstack[nvstack++] = (pnext+1)%3;
+
+		// make a triangle fan using edges
+		// and first vertex
+		while(vnext != vstart) {
+
+			v2 = vertbuffer[vcur].pos;
+			v1 = vertbuffer[vnext].pos;
+
+			locvol = ONE_SIXTH*(-(v2.x*v1.y*v0.z) + v1.x*v2.y*v0.z + v2.x*v0.y*v1.z
+				   	- v0.x*v2.y*v1.z - v1.x*v0.y*v2.z + v0.x*v1.y*v2.z); 
+
+			moments[0] += locvol; 
+			if(polyorder >= 1) {
+				moments[1] += locvol*0.25*(v0.x + v1.x + v2.x);
+				moments[2] += locvol*0.25*(v0.y + v1.y + v2.y);
+				moments[3] += locvol*0.25*(v0.z + v1.z + v2.z);
+			}
+			if(polyorder >= 2) {
+				moments[4] += locvol*0.1*(v0.x*v0.x + v1.x*v1.x + v2.x*v2.x + v1.x*v2.x + v0.x*(v1.x + v2.x));
+				moments[5] += locvol*0.1*(v0.y*v0.y + v1.y*v1.y + v2.y*v2.y + v1.y*v2.y + v0.y*(v1.y + v2.y));
+				moments[6] += locvol*0.1*(v0.z*v0.z + v1.z*v1.z + v2.z*v2.z + v1.z*v2.z + v0.z*(v1.z + v2.z));
+				moments[7] += locvol*0.05*(v2.x*v0.y + v2.x*v1.y + 2*v2.x*v2.y + v0.x*(2*v0.y + v1.y + v2.y) + v1.x*(v0.y + 2*v1.y + v2.y));
+				moments[8] += locvol*0.05*(v2.y*v0.z + v2.y*v1.z + 2*v2.y*v2.z + v0.y*(2*v0.z + v1.z + v2.z) + v1.y*(v0.z + 2*v1.z + v2.z));
+				moments[9] += locvol*0.05*(v2.x*v0.z + v2.x*v1.z + 2*v2.x*v2.z + v0.x*(2*v0.z + v1.z + v2.z) + v1.x*(v0.z + 2*v1.z + v2.z));
+			}
+
+			// move to the next edge
+			for(np = 0; np < 3; ++np) if(vertbuffer[vnext].pnbrs[np] == vcur) break;
+			vcur = vnext;
+			pnext = (np+1)%3;
+			emarks[vcur][pnext] = 1;
+			vnext = vertbuffer[vcur].pnbrs[pnext];
+			vstack[nvstack++] = vcur;
+			vstack[nvstack++] = (pnext+1)%3;
+		}
+	}
+#endif
+
+	return tet.mass/(tetvol + 1.0e-99)*cur3d_reduce(&poly)/(d.x*d.y*d.z);
+}
+
+// parallel prefix scan in shared memory
+// scan is in-place, so the result replaces the input array
+// assumes input of length THREADS_PER_SM
+// from GPU Gems 3, ch. 39
+__device__ void cur3du_cumsum(r3d_int* arr) {
+
+	// TODO: faster scan operation might be needed
+	// (i.e. naive but less memory-efficient)
+	r3d_int offset, d, ai, bi, t;
+
+	// build the sum in place up the tree
+	offset = 1;
+	for (d = THREADS_PER_SM>>1; d > 0; d >>= 1) {
+		__syncthreads();
+		if (threadIdx.x < d) {
+			ai = offset*(2*threadIdx.x+1)-1;
+			bi = offset*(2*threadIdx.x+2)-1;
+			arr[bi] += arr[ai];
+		}
+		offset *= 2;
+	}
+
+	// clear the last element
+	if (threadIdx.x == 0)
+		arr[THREADS_PER_SM - 1] = 0;   
+
+	// traverse down the tree building the scan in place
+	for (d = 1; d < THREADS_PER_SM; d *= 2) {
+		offset >>= 1;
+		__syncthreads();
+		if (threadIdx.x < d) {
+			ai = offset*(2*threadIdx.x+1)-1;
+			bi = offset*(2*threadIdx.x+2)-1;
+			t = arr[ai];
+			arr[ai] = arr[bi];
+			arr[bi] += t;
+		}
+	}
+	__syncthreads();
+}
+
+__device__ void cur3du_get_aabb(cur3d_element tet, r3d_dvec3 n, r3d_rvec3 d, r3d_dvec3 &vmin, r3d_dvec3 &vmax) {
+
+		// get the AABB for this tet
+		// and clamp to destination grid dims
+		r3d_int v;
+		r3d_rvec3 rmin, rmax;
+		rmin.x = 1.0e10; rmin.y = 1.0e10; rmin.z = 1.0e10;
+		rmax.x = -1.0e10; rmax.y = -1.0e10; rmax.z = -1.0e10;
+		for(v = 0; v < 4; ++v) {
+			if(tet.pos[v].x < rmin.x) rmin.x = tet.pos[v].x;
+			if(tet.pos[v].x > rmax.x) rmax.x = tet.pos[v].x;
+			if(tet.pos[v].y < rmin.y) rmin.y = tet.pos[v].y;
+			if(tet.pos[v].y > rmax.y) rmax.y = tet.pos[v].y;
+			if(tet.pos[v].z < rmin.z) rmin.z = tet.pos[v].z;
+			if(tet.pos[v].z > rmax.z) rmax.z = tet.pos[v].z;
+		}
+		vmin.i = floor(rmin.x/d.x);
+		vmin.j = floor(rmin.y/d.y);
+		vmin.k = floor(rmin.z/d.z);
+		vmax.i = ceil(rmax.x/d.x);
+		vmax.j = ceil(rmax.y/d.y);
+		vmax.k = ceil(rmax.z/d.z);
+		if(vmin.i < 0) vmin.i = 0;
+		if(vmin.j < 0) vmin.j = 0;
+		if(vmin.k < 0) vmin.k = 0;
+		if(vmax.i > n.i) vmax.i = n.i;
+		if(vmax.j > n.j) vmax.j = n.j;
+		if(vmax.k > n.k) vmax.k = n.k;
+
+}
+
+__device__ r3d_int cur3du_num_clip(cur3d_element tet, r3d_dvec3 gidx, r3d_rvec3 d) {
+
+	r3d_real tetvol;
+	r3d_plane faces[4];
+	r3d_rvec3 gpt;
+	r3d_int f, ii, jj, kk;
+	unsigned char andcmp, orcmp, fflags;
+	/*r3d_int nclip;*/
+
+	// properly orient the tet
+	tetvol = cur3du_orient(tet);
+	if(tetvol < 0.0) {
+		gpt = tet.pos[2];
+		tet.pos[2] = tet.pos[3];
+		tet.pos[3] = gpt;
+		tetvol = -tetvol;
+	}
+
+	// TODO: This does some sqrts that might not be needed...
+	r3d_tet_faces_from_verts(faces, tet.pos);
+	
+	// test the bin corners against tet faces to determine voxel type
+	orcmp = 0x00;
+	andcmp = 0x0f;
+	for(ii = 0; ii < 2; ++ii)
+	for(jj = 0; jj < 2; ++jj)
+	for(kk = 0; kk < 2; ++kk) {
+		gpt.x = (ii + gidx.i)*d.x; gpt.y = (jj + gidx.j)*d.y; gpt.z = (kk + gidx.k)*d.z;
+		fflags = 0x00;
+		for(f = 0; f < 4; ++f) 
+			if(faces[f].d + dot(gpt, faces[f].n) > 0.0) fflags |= (1 << f);
+		andcmp &= fflags;
+		orcmp |= fflags;
+	}
+
+	// if the voxel is completely outside the tet, return -1
+	if(orcmp < 0x0f) return -1;
+	
+	// else, return the number of faces to be clipped against
+	return 4 - __popc(andcmp);
+}
+
+ r3d_int r3d_is_good(r3d_poly* poly) {
 
 	r3d_int v, np, rcur;
 	r3d_int nvstack;
@@ -472,7 +736,7 @@ void r3d_init_tet(r3d_poly* poly, r3d_rvec3 verts[4]) {
 	for(v = 0; v < 4; ++v) vertbuffer[v].pos = verts[v];
 }
 
-void r3d_init_box(r3d_poly* poly, r3d_rvec3 rbounds[2]) {
+__device__ void r3d_init_box(r3d_poly* poly, r3d_rvec3 rbounds[2]) {
 	// direct access to vertex buffer
 	r3d_vertex* vertbuffer = poly->verts; 
 	r3d_int* nverts = &poly->nverts; 
@@ -528,7 +792,7 @@ void r3d_init_box(r3d_poly* poly, r3d_rvec3 rbounds[2]) {
 	vertbuffer[7].pos.z = rbounds[1].z; 
 }
 
-void r3d_init_poly(r3d_poly* poly, r3d_rvec3* vertices, r3d_int numverts, r3d_int** faceinds, r3d_int* numvertsperface, 	r3d_int numfaces) {
+ void r3d_init_poly(r3d_poly* poly, r3d_rvec3* vertices, r3d_int numverts, r3d_int** faceinds, r3d_int* numvertsperface, r3d_int numfaces) {
 	// dummy vars
 	r3d_int v, vprev, vcur, vnext, f, np;
 
@@ -683,8 +947,7 @@ void r3d_init_poly(r3d_poly* poly, r3d_rvec3* vertices, r3d_int numverts, r3d_in
 				vertbuffer[v].pnbrs[np] = util[vertbuffer[v].pnbrs[np]];
 	}
 }
-
-void r3d_tet_faces_from_verts(r3d_plane* faces, r3d_rvec3* verts) {
+__device__ void r3d_tet_faces_from_verts(r3d_plane* faces, r3d_rvec3* verts) {
 	r3d_rvec3 tmpcent;
 	faces[0].n.x = ((verts[3].y - verts[1].y)*(verts[2].z - verts[1].z) - (verts[2].y - verts[1].y)*(verts[3].z - verts[1].z));
 	faces[0].n.y = ((verts[2].x - verts[1].x)*(verts[3].z - verts[1].z) - (verts[3].x - verts[1].x)*(verts[2].z - verts[1].z));
@@ -723,7 +986,7 @@ void r3d_tet_faces_from_verts(r3d_plane* faces, r3d_rvec3* verts) {
 	faces[3].d = -dot(faces[3].n, tmpcent);
 }
 
-void r3d_box_faces_from_verts(r3d_plane* faces, r3d_rvec3* rbounds) {
+ void r3d_box_faces_from_verts(r3d_plane* faces, r3d_rvec3* rbounds) {
 	faces[0].n.x = 0.0; faces[0].n.y = 0.0; faces[0].n.z = 1.0; faces[0].d = rbounds[0].z; 
 	faces[2].n.x = 0.0; faces[2].n.y = 1.0; faces[2].n.z = 0.0; faces[2].d = rbounds[0].y; 
 	faces[4].n.x = 1.0; faces[4].n.y = 0.0; faces[4].n.z = 0.0; faces[4].d = rbounds[0].x; 
@@ -732,7 +995,7 @@ void r3d_box_faces_from_verts(r3d_plane* faces, r3d_rvec3* rbounds) {
 	faces[5].n.x = -1.0; faces[5].n.y = 0.0; faces[5].n.z = 0.0; faces[5].d = rbounds[1].x; 
 }
 
-void r3d_poly_faces_from_verts(r3d_plane* faces, r3d_rvec3* vertices, r3d_int numverts, r3d_int** faceinds, r3d_int* numvertsperface, r3d_int numfaces) {
+ void r3d_poly_faces_from_verts(r3d_plane* faces, r3d_rvec3* vertices, r3d_int numverts, r3d_int** faceinds, r3d_int* numvertsperface, r3d_int numfaces) {
 	// dummy vars
 	r3d_int v, f;
 	r3d_rvec3 p0, p1, p2, centroid;
@@ -768,23 +1031,21 @@ void r3d_poly_faces_from_verts(r3d_plane* faces, r3d_rvec3* vertices, r3d_int nu
 	}
 }
 
-r3d_real r3d_orient(r3d_rvec3* verts) {
+__device__ r3d_real cur3du_orient(cur3d_element tet) {
 	r3d_real adx, bdx, cdx;
 	r3d_real ady, bdy, cdy;
 	r3d_real adz, bdz, cdz;
-	adx = verts[0].x - verts[3].x;	
-	bdx = verts[1].x - verts[3].x;
-	cdx = verts[2].x - verts[3].x;	
-	ady = verts[0].y - verts[3].y;	
-	bdy = verts[1].y - verts[3].y;	
-	cdy = verts[2].y - verts[3].y;	
-	adz = verts[0].z - verts[3].z;	
-	bdz = verts[1].z - verts[3].z;	
-	cdz = verts[2].z - verts[3].z;	
-
-	//printf("%f\n", (adx*bdy*cdz)+(bdx*cdy*adz)+(cdx*ady*bdz)-(cdx*bdy*adz)-(bdx*ady*cdz)-(adx*cdy*bdz));
-
-	return -ONE_SIXTH*(adx * (bdy * cdz - bdz * cdy)+ bdx * (cdy * adz - cdz * ady)+ cdx * (ady * bdz - adz * bdy));
+	adx = tet.pos[0].x - tet.pos[3].x;
+	bdx = tet.pos[1].x - tet.pos[3].x;
+	cdx = tet.pos[2].x - tet.pos[3].x;
+	ady = tet.pos[0].y - tet.pos[3].y;
+	bdy = tet.pos[1].y - tet.pos[3].y;
+	cdy = tet.pos[2].y - tet.pos[3].y;
+	adz = tet.pos[0].z - tet.pos[3].z;
+	bdz = tet.pos[1].z - tet.pos[3].z;
+	cdz = tet.pos[2].z - tet.pos[3].z;
+	
+	return -ONE_SIXTH*(adx * (bdy * cdz - bdz * cdy)+ bdx * (cdy * adz - cdz * ady)	+ cdx * (ady * bdz - adz * bdy));
 }
 
 void r3d_print(r3d_poly* poly) {
@@ -831,18 +1092,19 @@ r3d_rvec3 rand_uvec_3d() {
 	norm3(tmp);
 	return tmp;
 }
-
-r3d_real rand_tet_3d(r3d_rvec3 verts[4], r3d_real minvol) {
+/*
+r3d_real rand_tet_3d(cur3d_element tet, r3d_real minvol) {
 	// generates a random tetrahedron with vertices on the unit sphere,
 	// guaranteeing a volume of at least MIN_VOL (to avoid degenerate cases)
 	r3d_int v;
+	//v = threadIdx.x;
 	r3d_rvec3 swp;
 	r3d_real tetvol = 0.0;
 	while(tetvol < minvol) {		
 		for(v = 0; v < 4; ++v) {
 			verts[v] = rand_uvec_3d();				
 		}
-		tetvol = r3d_orient(verts);
+		tetvol = cur3du_orient(tet);
 		if(tetvol < 0.0) {
 			swp = verts[2];
 			verts[2] = verts[3];
@@ -851,6 +1113,284 @@ r3d_real rand_tet_3d(r3d_rvec3 verts[4], r3d_real minvol) {
 		}
 	}		
 	return tetvol;
+}*/
+
+// TODO: make this a generic "split" routine that just takes a plane.
+__device__ void r3d_split(r3d_poly* inpoly, r3d_poly** outpolys, r3d_real coord, r3d_int ax);
+
+__global__ void cur3d_vox_kernel(cur3d_element* elems, r3d_int nelem, r3d_real* rho, r3d_dvec3 n, r3d_rvec3 d) {
+	// voxel ring buffers, separated by number of faces to clip against
+	// TODO: group clip-and-reduce operations by number of clip faces
+	__shared__ r3d_int clip_voxels[4][2*THREADS_PER_SM];
+	__shared__ r3d_int clip_tets[4][2*THREADS_PER_SM];
+	__shared__ r3d_int vbuf_start[4], vbuf_end[4]; 
+
+	r3d_int tag_face[4];
+	r3d_int nclip;
+
+	__shared__ r3d_int cuminds[THREADS_PER_SM];
+
+	// cumulative voxel offsets
+	__shared__ r3d_int voxel_offsets[THREADS_PER_SM];
+	__shared__ r3d_int voxels_per_block;
+
+	// working vars
+	cur3d_element tet;
+	r3d_dvec3 vmin, vmax, vn, gidx; // voxel index range
+	r3d_int vflat; // counters and such
+	r3d_int tid; // local (shared memory) tet id
+	r3d_int gid; // global tet id
+	r3d_int vid; // local (shared memory) voxel id
+	r3d_int btm;
+	r3d_int top;
+	r3d_int nf;
+	
+	// STEP 1
+	// calculate offsets of each tet in the global voxel array
+	// assumes that the total tet batch is <= GPU threads
+	tid = threadIdx.x;
+ 	gid = blockIdx.x*blockDim.x + tid;
+	voxel_offsets[tid] = 0;
+	if(gid < nelem) {
+		cur3du_get_aabb(elems[gid], n, d, vmin, vmax);
+		voxel_offsets[tid] = (vmax.i - vmin.i)*(vmax.j - vmin.j)*(vmax.k - vmin.k); 
+	}
+	if(threadIdx.x == blockDim.x - 1)
+		voxels_per_block = voxel_offsets[threadIdx.x];
+	cur3du_cumsum(voxel_offsets);
+	if(threadIdx.x == blockDim.x - 1)
+		voxels_per_block += voxel_offsets[threadIdx.x];
+	__syncthreads();
+
+	// STEP 2
+	// process all voxels in the AABBs and bin into separate buffers
+	// for face and interior voxels
+	// each thread gets one voxel
+	if(threadIdx.x == 0)
+		for(nf = 0; nf < 4; ++nf) {
+			vbuf_start[nf] = 0;
+			vbuf_end[nf] = 0;
+		}
+	__syncthreads();
+	for(vid = threadIdx.x; vid < voxels_per_block; vid += blockDim.x) {
+
+		// binary search through cumulative voxel indices
+		// to get the correct tet
+		btm = 0;
+		top = THREADS_PER_SM; 
+		tid = (btm + top)/2;
+		while(vid < voxel_offsets[tid] || vid >= voxel_offsets[tid+1]) {
+			if(vid < voxel_offsets[tid]) top = tid;
+			else btm = tid + 1;
+			tid = (btm + top)/2;
+		}
+	 	gid = blockIdx.x*blockDim.x + tid;
+		tet = elems[gid];
+
+		// recompute the AABB for this tet	
+		// to get the grid index of this voxel
+		cur3du_get_aabb(tet, n, d, vmin, vmax);
+		vn.i = vmax.i - vmin.i;
+		vn.j = vmax.j - vmin.j;
+		vn.k = vmax.k - vmin.k;
+		vflat = vid - voxel_offsets[tid]; 
+		gidx.i = vflat/(vn.j*vn.k); 
+		gidx.j = (vflat - vn.j*vn.k*gidx.i)/vn.k;
+		gidx.k = vflat - vn.j*vn.k*gidx.i - vn.k*gidx.j;
+		gidx.i += vmin.i; gidx.j += vmin.j; gidx.k += vmin.k;
+
+		// check the voxel against the tet faces
+		nclip = cur3du_num_clip(tet, gidx, d);
+
+		for(nf = 0; nf < 4; ++nf) tag_face[nf] = 0;
+		if(nclip == 0) // completely contained voxel 
+			tag_face[0] = 0;//atomicAdd(&rho[n.j*n.k*gidx.i + n.k*gidx.j + gidx.k], tet.mass/(fabs(cur3du_orient(tet)) + 1.0e-99));
+		else if(nclip > 0) // voxel must be clipped
+			tag_face[nclip-1] = 1;
+
+		__syncthreads();
+
+		// STEP 3
+		// accumulate face voxels to a ring buffer
+		// parallel scan to get indices, then parallel write to the ring buffer
+		for(nf = 0; nf < 4; ++nf) {
+			cuminds[threadIdx.x] = tag_face[nf];
+			cur3du_cumsum(cuminds);
+			if(tag_face[nf]) {
+				clip_voxels[nf][(vbuf_end[nf] + cuminds[threadIdx.x])%(2*THREADS_PER_SM)] = n.j*n.k*gidx.i + n.k*gidx.j + gidx.k;
+				clip_tets[nf][(vbuf_end[nf] + cuminds[threadIdx.x])%(2*THREADS_PER_SM)] = tid;
+			}
+			if(threadIdx.x == blockDim.x - 1)
+				vbuf_end[nf] += cuminds[threadIdx.x] + tag_face[nf];
+			__syncthreads();
+		}
+
+		// STEP 4
+		// parallel reduction of face voxels (1 per thread)
+		for(nf = 0; nf < 4; ++nf) {
+			if(vbuf_end[nf] - vbuf_start[nf] >= THREADS_PER_SM) {
+
+				// recompute i, j, k, faces for this voxel
+				vflat = clip_voxels[nf][(threadIdx.x + vbuf_start[nf])%(2*THREADS_PER_SM)]; 
+				gidx.i = vflat/(n.j*n.k); 
+				gidx.j = (vflat - n.j*n.k*gidx.i)/n.k;
+				gidx.k = vflat - n.j*n.k*gidx.i - n.k*gidx.j;
+				tet = elems[blockIdx.x*blockDim.x + clip_tets[nf][(threadIdx.x + vbuf_start[nf])%(2*THREADS_PER_SM)]];
+
+				// clip and reduce to grid
+				/*atomicAdd(&rho[vflat], cur3d_clip_and_reduce(tet, gidx, d));*/
+
+				// shift ring buffer head
+				if(threadIdx.x == 0)
+					vbuf_start[nf] += THREADS_PER_SM;
+			} 
+			__syncthreads();
+		}
+	}
+
+	// STEP 5
+	// clean up any face voxels remaining in the ring buffer
+	/*	for(nf = 0; nf < 4; ++nf) {
+			if(threadIdx.x < vbuf_end[nf] - vbuf_start[nf]) {
+
+				// recompute i, j, k, faces for this voxel
+				vflat = clip_voxels[nf][(threadIdx.x + vbuf_start[nf])%(2*THREADS_PER_SM)]; 
+				gidx.i = vflat/(n.j*n.k); 
+				gidx.j = (vflat - n.j*n.k*gidx.i)/n.k;
+				gidx.k = vflat - n.j*n.k*gidx.i - n.k*gidx.j;
+				tet = elems[blockIdx.x*blockDim.x + clip_tets[nf][(threadIdx.x + vbuf_start[nf])%(2*THREADS_PER_SM)]];
+
+				// clip and reduce to grid
+				atomicAdd(&rho[vflat], cur3d_clip_and_reduce(tet, gidx, d));
+
+				// shift ring buffer head
+				if(threadIdx.x == 0)
+					vbuf_start[nf] += THREADS_PER_SM;
+			} 
+			__syncthreads();
+		}
+
+
+	if(threadIdx.x < vbuf_end - vbuf_start) {
+
+		// recompute i, j, k, faces for this voxel
+		vflat = face_voxels[(threadIdx.x + vbuf_start)%(2*THREADS_PER_SM)]; 
+		gidx.i = vflat/(n.j*n.k); 
+		gidx.j = (vflat - n.j*n.k*gidx.i)/n.k;
+		gidx.k = vflat - n.j*n.k*gidx.i - n.k*gidx.j;
+		tet = elems[blockIdx.x*blockDim.x + face_tets[(threadIdx.x + vbuf_start)%(2*THREADS_PER_SM)]];
+
+		// clip and reduce to grid
+		atomicAdd(&rho[vflat], cur3d_clip_and_reduce(tet, gidx, d));
+	}*/
+}
+
+__device__ void r3d_split(r3d_poly* inpoly, r3d_poly** outpolys, r3d_real coord, r3d_int ax) {
+	// direct access to vertex buffer
+	if(inpoly->nverts <= 0) return;
+	r3d_int* nverts = &inpoly->nverts;
+	r3d_vertex* vertbuffer = inpoly->verts; 
+	r3d_int v, np, npnxt, onv, vcur, vnext, vstart, pnext, nright, cside;
+	r3d_rvec3 newpos;
+	r3d_int side[R3D_MAX_VERTS];
+	r3d_real sdists[R3D_MAX_VERTS];
+
+	// calculate signed distances to the clip plane
+	nright = 0;
+	memset(&side, 0, sizeof(side));
+	for(v = 0; v < *nverts; ++v) {			
+		sdists[v] = coord - vertbuffer[v].pos.xyz[ax];
+		if(sdists[v] < 0.0) {
+			side[v] = 1;
+			nright++;
+		}
+	}
+
+	// return if the poly lies entirely on one side of it 
+	if(nright == 0) {
+		*(outpolys[0]) = *inpoly;
+		outpolys[1]->nverts = 0;
+		return;
+	}
+	if(nright == *nverts) {
+		*(outpolys[1]) = *inpoly;
+		outpolys[0]->nverts = 0;
+		return;
+	}
+
+	// check all edges and insert new vertices on the bisected edges 
+	onv = inpoly->nverts;
+	for(vcur = 0; vcur < onv; ++vcur) {
+		if(side[vcur]) continue;
+		for(np = 0; np < 3; ++np) {
+			vnext = vertbuffer[vcur].pnbrs[np];
+			if(!side[vnext]) continue;
+			wav(vertbuffer[vcur].pos, -sdists[vnext], vertbuffer[vnext].pos, sdists[vcur], newpos);
+			vertbuffer[*nverts].pos = newpos;
+			vertbuffer[*nverts].pnbrs[0] = vcur;
+			vertbuffer[vcur].pnbrs[np] = *nverts;
+			(*nverts)++;
+			vertbuffer[*nverts].pos = newpos;
+			side[*nverts] = 1;
+			vertbuffer[*nverts].pnbrs[0] = vnext;
+			for(npnxt = 0; npnxt < 3; ++npnxt) 
+				if(vertbuffer[vnext].pnbrs[npnxt] == vcur) break;
+			vertbuffer[vnext].pnbrs[npnxt] = *nverts;
+			(*nverts)++;
+		}
+	}
+
+	// for each new vert, search around the faces for its new neighbors
+	// and doubly-link everything
+	for(vstart = onv; vstart < *nverts; ++vstart) {
+		vcur = vstart;
+		vnext = vertbuffer[vcur].pnbrs[0];
+		do {
+			for(np = 0; np < 3; ++np) if(vertbuffer[vnext].pnbrs[np] == vcur) break;
+			vcur = vnext;
+			pnext = (np+1)%3;
+			vnext = vertbuffer[vcur].pnbrs[pnext];
+		} while(vcur < onv);
+		vertbuffer[vstart].pnbrs[2] = vcur;
+		vertbuffer[vcur].pnbrs[1] = vstart;
+	}
+
+	// copy and compress vertices into their new buffers
+	// reusing side[] for reindexing
+	onv = *nverts;
+	outpolys[0]->nverts = 0;
+	outpolys[1]->nverts = 0;
+	for(v = 0; v < onv; ++v) {
+		cside = side[v];
+		outpolys[cside]->verts[outpolys[cside]->nverts] = vertbuffer[v];
+		side[v] = (outpolys[cside]->nverts)++;
+	}
+
+	for(v = 0; v < outpolys[0]->nverts; ++v) 
+		for(np = 0; np < 3; ++np)
+			outpolys[0]->verts[v].pnbrs[np] = side[outpolys[0]->verts[v].pnbrs[np]];
+	for(v = 0; v < outpolys[1]->nverts; ++v) 
+		for(np = 0; np < 3; ++np)
+			outpolys[1]->verts[v].pnbrs[np] = side[outpolys[1]->verts[v].pnbrs[np]];
+}
+
+void r3d_get_ibox(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_rvec3 d) {
+	r3d_int i, v;
+	r3d_rvec3 rbox[2];
+	for(i = 0; i < 3; ++i) {
+		rbox[0].xyz[i] = 1.0e30;
+		rbox[1].xyz[i] = -1.0e30;
+	}
+	for(v = 0; v < poly->nverts; ++v) {
+		for(i = 0; i < 3; ++i) {
+			if(poly->verts[v].pos.xyz[i] < rbox[0].xyz[i]) rbox[0].xyz[i] = poly->verts[v].pos.xyz[i];
+			if(poly->verts[v].pos.xyz[i] > rbox[1].xyz[i]) rbox[1].xyz[i] = poly->verts[v].pos.xyz[i];
+		}
+	}
+	for(i = 0; i < 3; ++i) {
+		ibox[0].ijk[i] = floor(rbox[0].xyz[i]/d.xyz[i]);
+		ibox[1].ijk[i] = ceil(rbox[1].xyz[i]/d.xyz[i]);
+	}
 }
 
 //This function calculates the average of the data array over the CPU in a sequential programming
@@ -1161,58 +1701,78 @@ extern "C"{
 		printf("\tms: %f\n\n",((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
 		//fprintf(f, "%f %f\n", milliseconds, ((double)(t_fin-t_ini)/CLOCKS_PER_SEC)*1000);
 		//fclose(f);		
-	}	
+	}
 
-	void test_voxelization(){
-		// Test r3d_voxelize() by checking that the voxelized moments
-		// do indeed sum to those of the original input		
+	__host__ void voxelization() {
+		cudaEventCreate(&start);
+		cudaEventCreate(&stop);
+		cudaEventRecord(start);
+		setbuf(stdout, NULL);
+		cudaError_t e = cudaSuccess;
+		//Variables declaration and initialization
+		r3d_int nelem = 10;
+		r3d_real* rho_h = (r3d_real*)malloc(sizeof(r3d_real));
+		*rho_h = 10;		
+		cur3d_element* elems_h = (cur3d_element*)malloc(nelem*sizeof(cur3d_element));
+		elems_h->mass = 20;
+		elems_h->pos[0].x = 5;
+		elems_h->pos[0].y = 5;
+		elems_h->pos[0].z = 5;
+		elems_h->pos[0].xyz[0] = 10;
+		elems_h->pos[0].xyz[1] = 10;
+		elems_h->pos[0].xyz[2] = 10;				
+		r3d_dvec3 n;
+		n.ijk[0] = 5;
+		n.ijk[1] = 5;
+		n.ijk[2] = 5;		
+		r3d_rvec3 d;
+		d.xyz[0] = 6;
+		d.xyz[1] = 6;
+		d.xyz[2] = 6;
+		// Allocate target grid on the device
+		//r3d_long ntot = n.i*n.j*n.k;
+		r3d_long ntot = 20;
+		r3d_real* rho_d;
+		cudaMalloc((void**) &rho_d, ntot*sizeof(r3d_real));
+		cudaMemcpy(rho_d, rho_h, ntot*sizeof(r3d_real), cudaMemcpyHostToDevice);
 
-		// vars
-		r3d_int i, j, k, v, curorder, mind;
-		r3d_long gg; 
-		r3d_int nmom = R3D_NUM_MOMENTS(POLY_ORDER);
-		r3d_real voxsum, tmom[nmom];
-		r3d_poly poly;
-		r3d_rvec3 verts[4];
+		// Allocate and copy element buffer to the device
+		cur3d_element* elems_d;
+		cudaMalloc((void**) &elems_d, nelem*sizeof(cur3d_element));
+		cudaMemcpy(elems_d, elems_h, nelem*sizeof(cur3d_element), cudaMemcpyHostToDevice);
 
-		// create a random tet in the unit box
-		rand_tet_3d(verts, MIN_VOL);
-		for(v = 0; v < 4; ++v){
-			for(i = 0; i < 3; ++i) {
-				verts[v].xyz[i] += 1.0;		
-				verts[v].xyz[i] *= 0.5;
-			}
-		}
+		printf("Launching voxelization kernel, %d SMs * %d threads/SM = %d threads\n", NUM_SM, THREADS_PER_SM, NUM_SM*THREADS_PER_SM);		
+		
+		cur3d_vox_kernel<<<NUM_SM, THREADS_PER_SM>>>(elems_d, nelem, rho_d, n, d);
+		cudaEventRecord(stop);
+		e = cudaGetLastError();
+		cur3d_err(e);		
 
-		r3d_init_tet(&poly, verts);
-
-		// get its original moments for reference
-		r3d_reduce(&poly, tmom, POLY_ORDER);
-
-		// voxelize it
-		r3d_rvec3 dx = {1.0/NGRID, 1.0/NGRID, 1.0/NGRID};
-		r3d_dvec3 ibox[2];
-		r3d_get_ibox(&poly, ibox, dx);
-		printf("Voxelizing a tetrahedron to a grid with dx = %f %f %f and moments of order %d\n", dx.x, dx.y, dx.z, POLY_ORDER);
-		printf("Minimum index box = %d %d %d to %d %d %d\n", ibox[0].i, ibox[0].j, ibox[0].k, ibox[1].i, ibox[1].j, ibox[1].k);
-		r3d_int nvoxels = (ibox[1].i-ibox[0].i)*(ibox[1].j-ibox[0].j)*(ibox[1].k-ibox[0].k);
-		r3d_real* grid = (r3d_real*)calloc(nvoxels*nmom, sizeof(r3d_real));
-		r3d_print(&poly);
-		r3d_voxelize(&poly, ibox, grid, dx, POLY_ORDER);
-		printf("\n\n");
-		r3d_print(&poly);
-		// make sure the sum of each moment equals the original 
-		for(curorder = 0, mind = 0; curorder <= POLY_ORDER; ++curorder) {
-			printf("Order = %d\n", curorder);
-			for(i = curorder; i >= 0; --i)
-				for(j = curorder - i; j >= 0; --j, ++mind) {
-					k = curorder - i - j;
-					voxsum = 0.0;
-					for(gg = 0; gg < nvoxels; ++gg) voxsum += grid[nmom*gg+mind];
-					printf(" Int[ x^%d y^%d z^%d dV ] original = %.10e, voxsum = %.10e, error = %.10e\n", 
-							i, j, k, tmom[mind], voxsum, fabs(1.0 - tmom[mind]/voxsum));
-				}
-		}
-		free(grid);
+		// TODO: this needs to be a reduction...
+		cudaMemcpy(rho_h, rho_d, ntot*sizeof(r3d_real), cudaMemcpyDeviceToHost);
+		cudaMemcpy(elems_h, elems_d, nelem*sizeof(cur3d_element), cudaMemcpyDeviceToHost);
+		
+		// free device arrays
+		cudaFree(rho_d);
+		cudaFree(elems_d);
+		cudaEventSynchronize(stop);
+		float ms = 0;
+		cudaEventElapsedTime(&ms, start, stop);
+		printf("milliseconds: %f\n", ms);
+		printf("Testing compilation\n");
+		return;
 	}
 }
+/*
+		printf("rho_h: %f\n", *rho_h);
+		printf("mass: %f\n", elems_h->mass);
+		printf("pos 0 0: %f\n", elems_h->pos[0].xyz[0]);
+		printf("pos 0 1: %f\n", elems_h->pos[0].xyz[1]);
+		printf("pos 0 2: %f\n", elems_h->pos[0].xyz[2]);
+
+		printf("rho_h: %f\n", *rho_h);
+		printf("mass: %f\n", elems_h->mass);
+		printf("pos 0 0: %f\n", elems_h->pos[0].xyz[0]);
+		printf("pos 0 1: %f\n", elems_h->pos[0].xyz[1]);
+		printf("pos 0 2: %f\n", elems_h->pos[0].xyz[2]);
+*/

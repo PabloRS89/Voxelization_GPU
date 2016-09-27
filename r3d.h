@@ -23,6 +23,7 @@
 
 #include <stdint.h>
 
+#define R3D_MAX_VERTS 64
 /**
  * \file r3d.h
  * \author Devon Powell
@@ -80,19 +81,27 @@ typedef struct {
 	r3d_real d; /*!< Signed perpendicular distance to the origin. */
 } r3d_plane;
 
+/** \struct r3d_orientation
+ *  \brief Perpendicular distances and bit flags for up to 6 faces.
+ */
+typedef struct {
+	r3d_real fdist[4]; /*!< Signed distances to clip planes. */
+	unsigned char fflags; /*!< Bit flags corresponding to inside (1) or outside (0) of each clip plane. */
+} r3d_orientation;
+
 /** \struct r3d_vertex
  * \brief A doubly-linked vertex.
  */
 typedef struct {
 	r3d_int pnbrs[3]; /*!< Neighbor indices. */
 	r3d_rvec3 pos; /*!< Vertex position. */
+	r3d_orientation orient; /*!< Orientation with respect to clip planes. */
 } r3d_vertex;
 
 /** \struct r3d_poly
  * \brief A polyhedron. Can be convex, nonconvex, even multiply-connected.
  */
 typedef struct {
-#define R3D_MAX_VERTS 128
 	r3d_vertex verts[R3D_MAX_VERTS]; /*!< Vertex buffer. */
 	r3d_int nverts; /*!< Number of vertices in the buffer. */
 } r3d_poly;
@@ -133,7 +142,7 @@ void r3d_clip(r3d_poly* poly, r3d_plane* planes, r3d_int nplanes);
  */
 
 #define R3D_NUM_MOMENTS(order) ((order+1)*(order+2)*(order+3)/6)
-void r3d_reduce(r3d_poly* poly, r3d_real* moments, r3d_int polyorder);
+__device__ void cur3d_reduce(r3d_poly* poly, r3d_real* moments, r3d_long* polyorder);
 
 /**
  * \brief Checks a polyhedron to see if all vertices have three valid edges, that all vertices are
@@ -265,7 +274,7 @@ void r3d_init_tet(r3d_poly* poly, r3d_rvec3* verts);
  * An array of two vectors, giving the lower and upper corners of the box.
  *
  */
-void r3d_init_box(r3d_poly* poly, r3d_rvec3* rbounds);
+//void r3d_init_box(r3d_poly* poly, r3d_rvec3* rbounds);
 
 /**
  * \brief Initialize a general polyhedron from a full boundary description.
@@ -306,7 +315,7 @@ void r3d_init_poly(r3d_poly* poly, r3d_rvec3* vertices, r3d_int numverts,
  * Array of four vectors defining the vertices of the tetrahedron.
  *
  */
-void r3d_tet_faces_from_verts(r3d_plane* faces, r3d_rvec3* verts);
+__device__ void r3d_tet_faces_from_verts(r3d_plane* faces, r3d_rvec3* verts);
 
 /**
  * \brief Get six faces (unit normals and distances to the origin)
@@ -350,3 +359,57 @@ void r3d_poly_faces_from_verts(r3d_plane* faces, r3d_rvec3* vertices, r3d_int nu
 						r3d_int** faceinds, r3d_int* numvertsperface, r3d_int numfaces);
 
 #endif // _R3D_H_
+
+#ifndef _V3D_H_
+#define _V3D_H_
+
+//#include "r3d.h"
+
+/**
+ * \file v3d.h
+ * \author Devon Powell
+ * \date 15 October 2015
+ * \brief Interface for r3d voxelization routines
+ */
+
+/**
+ * \brief Voxelize a polyhedron to the destination grid.
+ *
+ * \param [in] poly 
+ * The polyhedron to be voxelized.
+ *
+ * \param [in] ibox 
+ * Minimum and maximum indices of the polyhedron, found with `r3d_get_ibox()`. These indices are
+ * from a virtual grid starting at the origin. 
+ *
+ * \param [in, out] dest_grid 
+ * The voxelization buffer. This grid is a row-major grid patch starting at `d*ibox[0]` and ending
+ * at `d*ibox[1]. Must have size of at least 
+ * `(ibox[1].i-ibox[0].i)*(ibox[1].j-ibox[0].j)*(ibox[1].k-ibox[0].k)*R3D_NUM_MOMENTS(polyorder)`.
+ *
+ * \param [in] d 
+ * The cell spacing of the grid.
+ *
+ * \param [in] polyorder
+ * Order of the polynomial density field to voxelize. 
+ * 0 for constant (1 moment), 1 for linear (4 moments), 2 for quadratic (10 moments), etc.
+ *
+ */
+__global__ void r3d_voxelize(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_real* dest_grid, r3d_rvec3 d, r3d_int polyorder);
+
+/**
+ * \brief Get the minimal box of grid indices for a polyhedron, given a grid cell spacing.
+ *
+ * \param [in] poly 
+ * The polyhedron for which to calculate the index box.
+ *
+ * \param [out] ibox 
+ * Minimal range of grid indices covered by the polyhedron.
+ *
+ * \param [in] d 
+ * The cell spacing of the grid. The origin of the grid is assumed to lie at the origin in space.
+ *
+ */
+void r3d_get_ibox(r3d_poly* poly, r3d_dvec3 ibox[2], r3d_rvec3 d);
+
+#endif // _V3D_H_

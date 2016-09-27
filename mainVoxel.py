@@ -87,17 +87,17 @@ def get_fft():
 
 __fft = get_fft()
 
-def test_voxelization():
+def voxelization():
     dll = ctypes.CDLL('./libr3d.so', mode=ctypes.RTLD_GLOBAL)
-    func = dll.test_voxelization    
+    func = dll.voxelization    
     return func
 
-__vox = test_voxelization()
+__vox = voxelization()
 
 # convenient python wrapper
 # it does all job with types convertation
 # from python ones to C++ ones 
-def voxelization_test():
+def voxelization():
     __vox()
 
 def cuda_average(size, pos):
@@ -134,4 +134,4 @@ if __name__ == '__main__':
     print "\n"
     print s.pos
     '''
-    voxelization_test()
+    voxelization()
